@@ -6,3 +6,5 @@ obj/
 TestResults/
 .playwright/
 .superpowers/
+src/StockAgent.Web/node_modules/
+src/StockAgent.Web/dist/

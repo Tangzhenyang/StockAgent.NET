@@ -4,8 +4,10 @@ using Microsoft.SemanticKernel;
 using StockAgent.Api.Features.ResearchTasks;
 using StockAgent.Api.Infrastructure.Ai;
 using StockAgent.Api.Infrastructure.DataSources;
+using StockAgent.Api.Infrastructure.Pdf;
 using StockAgent.Api.Infrastructure.Persistence;
 using StockAgent.Api.Infrastructure.Queueing;
+using StockAgent.Api.Infrastructure.Reports;
 using StockAgent.Api.Infrastructure.Research;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +31,8 @@ builder.Services.AddScoped<IWebResearchProvider, FakeWebResearchProvider>();
 builder.Services.AddScoped<ResearchOrchestrator>();
 builder.Services.AddSingleton(_ => Kernel.CreateBuilder().Build());
 builder.Services.AddScoped<IResearchAnalysisService, SemanticKernelResearchAnalysisService>();
+builder.Services.AddScoped<ReportGenerator>();
+builder.Services.AddScoped<IPdfExportService, PlaywrightPdfExportService>();
 builder.Services.AddHostedService<ResearchWorker>();
 
 var app = builder.Build();

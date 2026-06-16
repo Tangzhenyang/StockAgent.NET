@@ -1,8 +1,16 @@
+using Microsoft.EntityFrameworkCore;
+using StockAgent.Api.Infrastructure.Persistence;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+builder.Services.AddDbContext<StockAgentDbContext>(options =>
+{
+    var connectionString = builder.Configuration.GetConnectionString("StockAgent");
+    options.UseNpgsql(connectionString);
+});
 
 var app = builder.Build();
 

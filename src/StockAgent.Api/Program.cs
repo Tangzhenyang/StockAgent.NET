@@ -1,8 +1,10 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using StockAgent.Api.Features.ResearchTasks;
+using StockAgent.Api.Infrastructure.DataSources;
 using StockAgent.Api.Infrastructure.Persistence;
 using StockAgent.Api.Infrastructure.Queueing;
+using StockAgent.Api.Infrastructure.Research;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,6 +22,10 @@ builder.Services.AddDbContext<StockAgentDbContext>(options =>
     options.UseNpgsql(connectionString);
 });
 builder.Services.AddSingleton<IResearchTaskQueue, ResearchTaskQueue>();
+builder.Services.AddScoped<IMarketDataProvider, FakeMarketDataProvider>();
+builder.Services.AddScoped<IWebResearchProvider, FakeWebResearchProvider>();
+builder.Services.AddScoped<ResearchOrchestrator>();
+builder.Services.AddHostedService<ResearchWorker>();
 
 var app = builder.Build();
 

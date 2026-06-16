@@ -34,3 +34,24 @@ export interface ResearchReport {
   html: string;
   ratingJson: string;
 }
+
+/**
+ * Evidence card displayed alongside a generated report.
+ */
+export interface EvidenceCard {
+  id: string;
+  claim: string;
+  snippet: string;
+  confidence: number;
+  relevance: number;
+  reportSection: string;
+}
+
+/**
+ * PDF export response returned by the backend.
+ */
+export interface PdfExportResponse {
+  researchTaskId: string;
+  filePath: string;
+  status: 'Completed';
+}

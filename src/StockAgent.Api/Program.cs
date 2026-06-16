@@ -1,16 +1,25 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using StockAgent.Api.Features.ResearchTasks;
 using StockAgent.Api.Infrastructure.Persistence;
+using StockAgent.Api.Infrastructure.Queueing;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
+
 builder.Services.AddDbContext<StockAgentDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("StockAgent");
     options.UseNpgsql(connectionString);
 });
+builder.Services.AddSingleton<IResearchTaskQueue, ResearchTaskQueue>();
 
 var app = builder.Build();
 
@@ -21,6 +30,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.MapResearchTaskEndpoints();
 
 var summaries = new[]
 {
@@ -47,3 +58,6 @@ record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
 {
     public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
 }
+
+/// <summary>Marker type used by WebApplicationFactory integration tests.</summary>
+public partial class Program;

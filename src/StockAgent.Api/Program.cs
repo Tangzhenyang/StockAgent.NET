@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.SemanticKernel;
 using StockAgent.Api.Features.ResearchTasks;
+using StockAgent.Api.Infrastructure.Ai;
 using StockAgent.Api.Infrastructure.DataSources;
 using StockAgent.Api.Infrastructure.Persistence;
 using StockAgent.Api.Infrastructure.Queueing;
@@ -25,6 +27,8 @@ builder.Services.AddSingleton<IResearchTaskQueue, ResearchTaskQueue>();
 builder.Services.AddScoped<IMarketDataProvider, FakeMarketDataProvider>();
 builder.Services.AddScoped<IWebResearchProvider, FakeWebResearchProvider>();
 builder.Services.AddScoped<ResearchOrchestrator>();
+builder.Services.AddSingleton(_ => Kernel.CreateBuilder().Build());
+builder.Services.AddScoped<IResearchAnalysisService, SemanticKernelResearchAnalysisService>();
 builder.Services.AddHostedService<ResearchWorker>();
 
 var app = builder.Build();

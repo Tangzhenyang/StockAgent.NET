@@ -1,7 +1,12 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.SemanticKernel;
+using StockAgent.Api.Features.Evidence;
+using StockAgent.Api.Features.Health;
+using StockAgent.Api.Features.Pdf;
+using StockAgent.Api.Features.Reports;
 using StockAgent.Api.Features.ResearchTasks;
+using StockAgent.Api.Features.Settings;
 using StockAgent.Api.Infrastructure.Ai;
 using StockAgent.Api.Infrastructure.DataSources;
 using StockAgent.Api.Infrastructure.Pdf;
@@ -46,6 +51,11 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.MapResearchTaskEndpoints();
+app.MapReportEndpoints();
+app.MapEvidenceEndpoints();
+app.MapPdfEndpoints();
+app.MapSettingsEndpoints();
+app.MapDataSourceHealthEndpoints();
 
 var summaries = new[]
 {

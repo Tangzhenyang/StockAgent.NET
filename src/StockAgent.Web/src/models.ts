@@ -29,6 +29,36 @@ export interface ResearchTask {
 }
 
 /**
+ * Durable execution status for one research pipeline step.
+ */
+export type ResearchStepStatus = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Skipped';
+
+/**
+ * Detailed diagnostic record for one research pipeline step.
+ */
+export interface ResearchStep {
+  id: string;
+  stepName:
+    | 'NormalizeTicker'
+    | 'CollectStructuredData'
+    | 'CollectPublicEvidence'
+    | 'IngestAndIndexDocuments'
+    | 'AnalyzeWithSemanticKernel'
+    | 'ScoreAndRate'
+    | 'GenerateReport'
+    | 'ExportPdf';
+  status: ResearchStepStatus;
+  retryCount: number;
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  inputSummary?: string;
+  outputSummary?: string;
+  errorMessage?: string;
+  isLongRunning: boolean;
+}
+
+/**
  * Report payload rendered by the report viewer.
  */
 export interface ResearchReport {

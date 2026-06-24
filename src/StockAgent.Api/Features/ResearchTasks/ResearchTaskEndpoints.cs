@@ -13,6 +13,8 @@ namespace StockAgent.Api.Features.ResearchTasks;
 /// </summary>
 public static class ResearchTaskEndpoints
 {
+    private static readonly TimeSpan LongRunningStepThreshold = TimeSpan.FromMinutes(3);
+
     /// <summary>Maps research task endpoints. 映射研究任务端点。</summary>
     public static IEndpointRouteBuilder MapResearchTaskEndpoints(this IEndpointRouteBuilder app)
     {
@@ -98,6 +100,49 @@ public static class ResearchTaskEndpoints
                 x => x.Id == id && x.UserId == userId,
                 cancellationToken);
             return task is null ? Results.NotFound() : Results.Ok(ToResponse(task));
+        });
+
+        group.MapGet("/{id:guid}/steps", async (
+            Guid id,
+            StockAgentDbContext db,
+            ICurrentUser currentUser,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = currentUser.RequireUserId();
+            var ownsTask = await db.ResearchTasks.AnyAsync(
+                x => x.Id == id && x.UserId == userId,
+                cancellationToken);
+            if (!ownsTask)
+            {
+                return Results.NotFound();
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var stepEntities = await db.ResearchSteps
+                .Where(x => x.ResearchTaskId == id)
+                .OrderBy(x => x.StartedAt ?? DateTimeOffset.MaxValue)
+                .ThenBy(x => x.CompletedAt ?? DateTimeOffset.MaxValue)
+                .ToListAsync(cancellationToken);
+            var steps = stepEntities
+                .Select(x => new ResearchStepResponse(
+                    x.Id,
+                    x.StepName,
+                    x.Status,
+                    x.RetryCount,
+                    x.StartedAt,
+                    x.CompletedAt,
+                    x.StartedAt == null
+                        ? null
+                        : Convert.ToInt64(((x.CompletedAt ?? now) - x.StartedAt.Value).TotalMilliseconds),
+                    x.InputSummary,
+                    x.OutputSummary,
+                    x.ErrorMessage,
+                    x.Status == StepStatus.Running
+                    && x.StartedAt != null
+                    && now - x.StartedAt.Value >= LongRunningStepThreshold))
+                .ToList();
+
+            return Results.Ok(steps);
         });
 
         return app;

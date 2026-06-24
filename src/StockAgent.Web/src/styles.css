@@ -223,7 +223,7 @@ a {
 
 .content {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 18px;
   padding: 20px;
 }
@@ -329,11 +329,101 @@ a {
 .reportViewer,
 .emptyState,
 .evidencePanel,
+.stepDetails,
 .settingsPanel,
 .historyList {
   border: 1px solid #d9dee7;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.stepDetails {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.stepDetailsHeader,
+.stepMain {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.stepDetailsHeader {
+  justify-content: space-between;
+}
+
+.stepDetailsHeader h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.stepDetailsHeader span,
+.stepMain span,
+.stepMain time,
+.stepEmpty {
+  color: #5d6b7a;
+  font-size: 13px;
+}
+
+.stepEmpty {
+  margin: 0;
+}
+
+.stepList {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.stepRow {
+  display: grid;
+  gap: 6px;
+  border-left: 3px solid #c8d2df;
+  padding: 8px 0 8px 10px;
+}
+
+.stepRow.running {
+  border-left-color: #1769aa;
+}
+
+.stepRow.succeeded {
+  border-left-color: #2e7d59;
+}
+
+.stepRow.failed {
+  border-left-color: #b42318;
+}
+
+.stepMain {
+  flex-wrap: wrap;
+}
+
+.stepMain strong {
+  min-width: 110px;
+}
+
+.stepSummary {
+  display: grid;
+  gap: 4px;
+}
+
+.stepSummary p {
+  margin: 0;
+  color: #4f5d6b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.stepSummary .stepError {
+  color: #b42318;
+}
+
+.stepSummary .stepWarning {
+  color: #a15c00;
 }
 
 .emptyState {

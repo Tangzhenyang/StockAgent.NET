@@ -1,4 +1,4 @@
-import type { EvidenceCard, PdfExportResponse, ResearchReport, ResearchTask } from '../models';
+import type { EvidenceCard, PdfExportResponse, ResearchReport, ResearchStep, ResearchTask } from '../models';
 
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000';
 
@@ -58,6 +58,20 @@ export async function listEvidenceCards(taskId: string): Promise<EvidenceCard[]>
   });
   if (!response.ok) {
     throw new Error(`List evidence cards failed with ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Loads detailed execution steps for the selected research task.
+ */
+export async function listResearchTaskSteps(taskId: string): Promise<ResearchStep[]> {
+  const response = await fetch(`${apiBaseUrl}/api/research-tasks/${taskId}/steps`, {
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    throw new Error(`List research task steps failed with ${response.status}`);
   }
 
   return response.json();

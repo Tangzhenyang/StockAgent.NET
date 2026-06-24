@@ -32,3 +32,31 @@ public sealed record ResearchTaskResponse(
     string Language,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+/// <summary>
+/// Diagnostic response for one durable research pipeline step.
+/// 单个持久化研究流水线步骤的诊断响应。
+/// </summary>
+/// <param name="Id">Step identifier. 步骤标识符。</param>
+/// <param name="StepName">Pipeline stage name. 流水线阶段名称。</param>
+/// <param name="Status">Step execution status. 步骤执行状态。</param>
+/// <param name="RetryCount">Retry attempts used by the step. 步骤已使用的重试次数。</param>
+/// <param name="StartedAt">UTC step start time. UTC 步骤开始时间。</param>
+/// <param name="CompletedAt">UTC step completion time. UTC 步骤完成时间。</param>
+/// <param name="DurationMs">Step duration in milliseconds when it can be calculated. 可计算时的步骤耗时毫秒数。</param>
+/// <param name="InputSummary">Short input summary safe for UI display. 可安全展示在 UI 的输入摘要。</param>
+/// <param name="OutputSummary">Short output summary safe for UI display. 可安全展示在 UI 的输出摘要。</param>
+/// <param name="ErrorMessage">Failure details safe for UI display. 可安全展示在 UI 的失败详情。</param>
+/// <param name="IsLongRunning">Whether the step is running longer than the diagnostic threshold. 步骤是否超过诊断阈值仍在运行。</param>
+public sealed record ResearchStepResponse(
+    Guid Id,
+    ResearchStage StepName,
+    StepStatus Status,
+    int RetryCount,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt,
+    long? DurationMs,
+    string? InputSummary,
+    string? OutputSummary,
+    string? ErrorMessage,
+    bool IsLongRunning);

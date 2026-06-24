@@ -57,6 +57,23 @@ public sealed class MultiAgentResearchPipelineTests
         }
 
         report.Should().NotBeNull();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
+            var steps = await db.ResearchSteps
+                .Where(x => x.ResearchTaskId == report!.ResearchTaskId)
+                .OrderBy(x => x.StartedAt)
+                .ToListAsync();
+
+            steps.Select(x => x.InputSummary).Should().Contain("请求行情/财务数据源");
+            steps.Select(x => x.OutputSummary).Should().Contain(x => x != null && x.Contains("行情/财务数据源完成"));
+            steps.Select(x => x.InputSummary).Should().Contain("请求公告/证据数据源");
+            steps.Select(x => x.OutputSummary).Should().Contain(x => x != null && x.Contains("获取到 2 条证据文档"));
+            steps.Select(x => x.OutputSummary).Should().Contain(x => x != null && x.Contains("生成 2 张证据卡片"));
+            steps.Select(x => x.InputSummary).Should().Contain("运行多 Agent 分析链路");
+            steps.Select(x => x.OutputSummary).Should().Contain(x => x != null && x.Contains("MarketFinancialAgent"));
+        }
     }
 
     private sealed class SequenceModelChatClient(params string[] responses) : IModelChatClient

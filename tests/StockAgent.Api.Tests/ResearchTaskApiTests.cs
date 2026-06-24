@@ -10,6 +10,7 @@ using StockAgent.Api.Features.ResearchTasks;
 using StockAgent.Api.Infrastructure.Ai;
 using StockAgent.Api.Infrastructure.Ai.Agents;
 using StockAgent.Api.Infrastructure.Ai.Chat;
+using StockAgent.Api.Infrastructure.Persistence;
 
 namespace StockAgent.Api.Tests;
 
@@ -63,6 +64,76 @@ public sealed class ResearchTaskApiTests
         scope.ServiceProvider.GetRequiredService<IModelChatClient>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<AgentContextBudgeter>().Should().NotBeNull();
         scope.ServiceProvider.GetRequiredService<IResearchAnalysisService>().Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Loading task steps returns ordered, user-owned diagnostic details for the workbench.
+    /// 读取任务步骤会为工作台返回按时间排序且归属当前用户的诊断明细。
+    /// </summary>
+    [Fact]
+    public async Task GetResearchTaskSteps_ReturnsOwnedStepsInStartOrder()
+    {
+        await using var factory = TestApplicationFactory.Create();
+
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true
+        });
+        await TestApplicationFactory.RegisterAndLoginAsync(client, "research-steps-user");
+
+        var task = await CreateTaskAsync(client, "700");
+        var firstStartedAt = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var secondStartedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
+            db.ResearchSteps.AddRange(
+                new ResearchStep
+                {
+                    ResearchTaskId = task.Id,
+                    StepName = ResearchStage.CollectStructuredData,
+                    Status = StepStatus.Succeeded,
+                    StartedAt = firstStartedAt,
+                    CompletedAt = firstStartedAt.AddSeconds(3),
+                    InputSummary = "请求行情快照",
+                    OutputSummary = "行情快照完成"
+                },
+                new ResearchStep
+                {
+                    ResearchTaskId = task.Id,
+                    StepName = ResearchStage.CollectPublicEvidence,
+                    Status = StepStatus.Running,
+                    StartedAt = secondStartedAt,
+                    InputSummary = "搜索公告与新闻"
+                });
+            await db.SaveChangesAsync();
+        }
+
+        var response = await client.GetAsync($"/api/research-tasks/{task.Id}/steps");
+        var responseJson = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, responseJson);
+        using var document = JsonDocument.Parse(responseJson);
+        var steps = document.RootElement.EnumerateArray().ToList();
+        steps.Should().HaveCountGreaterThanOrEqualTo(2);
+        steps[0].GetProperty("stepName").GetString().Should().Be(nameof(ResearchStage.CollectStructuredData));
+        steps[1].GetProperty("stepName").GetString().Should().Be(nameof(ResearchStage.CollectPublicEvidence));
+        steps[0].GetProperty("durationMs").GetInt64().Should().Be(3000);
+        steps[0].GetProperty("outputSummary").GetString().Should().Be("行情快照完成");
+        steps[1].GetProperty("status").GetString().Should().Be(nameof(StepStatus.Running));
+        steps[1].GetProperty("isLongRunning").GetBoolean().Should().BeFalse();
+    }
+
+    private static async Task<ResearchTaskResponse> CreateTaskAsync(HttpClient client, string ticker)
+    {
+        var response = await client.PostAsJsonAsync(
+            "/api/research-tasks",
+            new CreateResearchTaskRequest(ticker, Market.HongKong, "zh-CN"));
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var json = await response.Content.ReadAsStringAsync();
+        return JsonSerializer.Deserialize<ResearchTaskResponse>(json, CreateJsonSerializerOptions())!;
     }
 
     private static JsonSerializerOptions CreateJsonSerializerOptions()

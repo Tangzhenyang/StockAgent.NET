@@ -76,6 +76,7 @@ public sealed class UserScopedResearchApiTests
         aliceCompletedList!.Select(x => x.Id).Should().NotContain(bobTask.Id);
 
         (await alice.GetAsync($"/api/research-tasks/{bobTask.Id}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await alice.GetAsync($"/api/research-tasks/{bobTask.Id}/steps")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await alice.GetAsync($"/api/research-tasks/{bobTask.Id}/report")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await alice.GetAsync($"/api/research-tasks/{bobTask.Id}/evidence")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await alice.PostAsync($"/api/research-tasks/{bobTask.Id}/pdf", null)).StatusCode.Should().Be(HttpStatusCode.NotFound);

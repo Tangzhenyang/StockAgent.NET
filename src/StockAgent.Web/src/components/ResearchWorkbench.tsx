@@ -7,11 +7,13 @@ import {
   exportResearchReportPdf,
   getResearchReport,
   listEvidenceCards,
+  listResearchTaskSteps,
   listResearchTasks,
 } from '../api/researchApi';
 import type { ResearchTask } from '../models';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { ReportViewer } from './ReportViewer';
+import { TaskStepDetails } from './TaskStepDetails';
 import { TaskTimeline } from './TaskTimeline';
 
 const completedStatuses = new Set<ResearchTask['status']>(['Ready', 'Completed']);
@@ -47,6 +49,13 @@ export function ResearchWorkbench() {
     queryKey: ['researchEvidence', selectedTask?.id],
     queryFn: () => listEvidenceCards(selectedTask!.id),
     enabled: Boolean(selectedTask),
+    retry: false,
+  });
+  const stepQuery = useQuery({
+    queryKey: ['researchSteps', selectedTask?.id],
+    queryFn: () => listResearchTaskSteps(selectedTask!.id),
+    enabled: Boolean(selectedTask),
+    refetchInterval: 3000,
     retry: false,
   });
   const createMutation = useMutation({
@@ -105,6 +114,7 @@ export function ResearchWorkbench() {
       </aside>
       <section className="content">
         {selectedTask && <TaskTimeline status={selectedTask.status} />}
+        {selectedTask && <TaskStepDetails steps={stepQuery.data ?? []} isLoading={stepQuery.isFetching} />}
         <div className="workspaceGrid">
           <ReportViewer
             report={reportQuery.data}

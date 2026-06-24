@@ -33,51 +33,93 @@ public sealed class ResearchOrchestrator(
     /// </summary>
     public async Task RunAsync(Guid researchTaskId, CancellationToken cancellationToken)
     {
-        var task = await db.ResearchTasks.FirstAsync(x => x.Id == researchTaskId, cancellationToken);
-        var dataSourceSettings = await userSettingsService.GetDataSourceRuntimeSettingsAsync(task.UserId, cancellationToken);
-        await SetStatusAsync(task, ResearchTaskStatus.CollectingData, ResearchStage.CollectStructuredData, 10, cancellationToken);
-
-        var snapshot = await marketDataProvider.GetSnapshotAsync(task.Ticker, dataSourceSettings, cancellationToken);
-        task.CompanyName = snapshot.CompanyName;
-
-        await SetStatusAsync(task, ResearchTaskStatus.CollectingData, ResearchStage.CollectPublicEvidence, 30, cancellationToken);
-        var documents = await webResearchProvider.SearchAsync(
-            task.Ticker,
-            snapshot.CompanyName,
-            dataSourceSettings,
-            cancellationToken);
-
-        logger.LogInformation("Collected {DocumentCount} evidence documents for {Ticker}", documents.Count, task.Ticker);
-
-        await SetStatusAsync(task, ResearchTaskStatus.IngestingDocuments, ResearchStage.IngestAndIndexDocuments, 55, cancellationToken);
-        var evidenceCards = await IngestDocumentsAsync(task, documents, cancellationToken);
-
-        await SetStatusAsync(task, ResearchTaskStatus.Analyzing, ResearchStage.AnalyzeWithSemanticKernel, 75, cancellationToken);
-        var researchSettings = await userSettingsService.GetResearchSettingsAsync(task.UserId, cancellationToken);
-        var modelSettings = await userSettingsService.GetModelRuntimeSettingsAsync(task.UserId, cancellationToken);
-        var selectedEvidence = contextBudgetManager.SelectEvidence(evidenceCards, researchSettings.MaxEvidenceCards);
-        var analysis = await analysisService.AnalyzeAsync(
-            task.Id,
-            snapshot,
-            selectedEvidence,
-            modelSettings,
-            task.Language,
-            cancellationToken);
-
-        await SetStatusAsync(task, ResearchTaskStatus.GeneratingReport, ResearchStage.GenerateReport, 90, cancellationToken);
-        var generatedReport = reportGenerator.Generate(snapshot, analysis, selectedEvidence);
-        db.ResearchReports.Add(new ResearchReport
+        try
         {
-            ResearchTaskId = task.Id,
-            Language = task.Language,
-            Markdown = generatedReport.Markdown,
-            Html = generatedReport.Html,
-            RatingJson = JsonSerializer.Serialize(generatedReport.Score),
-            DataCutoffAt = DateTimeOffset.UtcNow
-        });
-        await db.SaveChangesAsync(cancellationToken);
+            var task = await db.ResearchTasks.FirstAsync(x => x.Id == researchTaskId, cancellationToken);
+            var dataSourceSettings = await userSettingsService.GetDataSourceRuntimeSettingsAsync(task.UserId, cancellationToken);
+            await UpdateTaskStatusAsync(task, ResearchTaskStatus.CollectingData, ResearchStage.CollectStructuredData, 10, cancellationToken);
 
-        await SetStatusAsync(task, ResearchTaskStatus.Ready, ResearchStage.GenerateReport, 100, cancellationToken);
+            var snapshot = await RunStepAsync(
+                task,
+                ResearchStage.CollectStructuredData,
+                "请求行情/财务数据源",
+                token => marketDataProvider.GetSnapshotAsync(task.Ticker, dataSourceSettings, token),
+                result => $"行情/财务数据源完成：{result.CompanyName}，PE {result.PeRatio:N1}，净利率 {result.NetMarginPercent:N1}%",
+                cancellationToken);
+            task.CompanyName = snapshot.CompanyName;
+
+            await UpdateTaskStatusAsync(task, ResearchTaskStatus.CollectingData, ResearchStage.CollectPublicEvidence, 30, cancellationToken);
+            var documents = await RunStepAsync(
+                task,
+                ResearchStage.CollectPublicEvidence,
+                "请求公告/证据数据源",
+                token => webResearchProvider.SearchAsync(
+                    task.Ticker,
+                    snapshot.CompanyName,
+                    dataSourceSettings,
+                    token),
+                result => $"获取到 {result.Count} 条证据文档",
+                cancellationToken);
+
+            logger.LogInformation("Collected {DocumentCount} evidence documents for {Ticker}", documents.Count, task.Ticker);
+
+            await UpdateTaskStatusAsync(task, ResearchTaskStatus.IngestingDocuments, ResearchStage.IngestAndIndexDocuments, 55, cancellationToken);
+            var evidenceCards = await RunStepAsync(
+                task,
+                ResearchStage.IngestAndIndexDocuments,
+                $"解析 {documents.Count} 条文档并生成证据卡片",
+                token => IngestDocumentsAsync(task, documents, token),
+                result => $"生成 {result.Count} 张证据卡片",
+                cancellationToken);
+
+            await UpdateTaskStatusAsync(task, ResearchTaskStatus.Analyzing, ResearchStage.AnalyzeWithSemanticKernel, 75, cancellationToken);
+            var researchSettings = await userSettingsService.GetResearchSettingsAsync(task.UserId, cancellationToken);
+            var modelSettings = await userSettingsService.GetModelRuntimeSettingsAsync(task.UserId, cancellationToken);
+            var selectedEvidence = contextBudgetManager.SelectEvidence(evidenceCards, researchSettings.MaxEvidenceCards);
+            var analysis = await RunStepAsync(
+                task,
+                ResearchStage.AnalyzeWithSemanticKernel,
+                "运行多 Agent 分析链路",
+                token => analysisService.AnalyzeAsync(
+                    task.Id,
+                    snapshot,
+                    selectedEvidence,
+                    modelSettings,
+                    task.Language,
+                    token),
+                result => $"多 Agent 分析完成：{string.Join("，", result.AgentTraces ?? [])}",
+                cancellationToken);
+
+            await UpdateTaskStatusAsync(task, ResearchTaskStatus.GeneratingReport, ResearchStage.GenerateReport, 90, cancellationToken);
+            await RunStepAsync(
+                task,
+                ResearchStage.GenerateReport,
+                "生成 Markdown/HTML 研究报告",
+                token =>
+                {
+                    var generatedReport = reportGenerator.Generate(snapshot, analysis, selectedEvidence);
+                    db.ResearchReports.Add(new ResearchReport
+                    {
+                        ResearchTaskId = task.Id,
+                        Language = task.Language,
+                        Markdown = generatedReport.Markdown,
+                        Html = generatedReport.Html,
+                        RatingJson = JsonSerializer.Serialize(generatedReport.Score),
+                        DataCutoffAt = DateTimeOffset.UtcNow
+                    });
+                    return Task.FromResult(generatedReport.Score.OverallScore);
+                },
+                score => $"报告生成完成：综合评分 {score}",
+                cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+
+            await UpdateTaskStatusAsync(task, ResearchTaskStatus.Ready, ResearchStage.GenerateReport, 100, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            await MarkTaskFailedAsync(researchTaskId, exception, cancellationToken);
+            throw;
+        }
     }
 
     private async Task<IReadOnlyList<EvidenceCard>> IngestDocumentsAsync(
@@ -142,7 +184,45 @@ public sealed class ResearchOrchestrator(
         return normalized.Length <= 160 ? normalized : normalized[..160];
     }
 
-    private async Task SetStatusAsync(
+    private async Task<T> RunStepAsync<T>(
+        ResearchTask task,
+        ResearchStage stage,
+        string inputSummary,
+        Func<CancellationToken, Task<T>> action,
+        Func<T, string> outputSummaryFactory,
+        CancellationToken cancellationToken)
+    {
+        var step = new ResearchStep
+        {
+            ResearchTaskId = task.Id,
+            StepName = stage,
+            Status = StepStatus.Running,
+            StartedAt = DateTimeOffset.UtcNow,
+            InputSummary = Truncate(inputSummary, 2000)
+        };
+        db.ResearchSteps.Add(step);
+        await db.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            var result = await action(cancellationToken);
+            step.Status = StepStatus.Succeeded;
+            step.CompletedAt = DateTimeOffset.UtcNow;
+            step.OutputSummary = Truncate(outputSummaryFactory(result), 2000);
+            await db.SaveChangesAsync(cancellationToken);
+            return result;
+        }
+        catch (Exception exception)
+        {
+            step.Status = StepStatus.Failed;
+            step.CompletedAt = DateTimeOffset.UtcNow;
+            step.ErrorMessage = Truncate(exception.Message, 4000);
+            await db.SaveChangesAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    private async Task UpdateTaskStatusAsync(
         ResearchTask task,
         ResearchTaskStatus status,
         ResearchStage stage,
@@ -153,15 +233,25 @@ public sealed class ResearchOrchestrator(
         task.CurrentStage = stage;
         task.ProgressPercent = progress;
         task.UpdatedAt = DateTimeOffset.UtcNow;
-        db.ResearchSteps.Add(new ResearchStep
-        {
-            ResearchTaskId = task.Id,
-            StepName = stage,
-            Status = StepStatus.Succeeded,
-            StartedAt = DateTimeOffset.UtcNow,
-            CompletedAt = DateTimeOffset.UtcNow,
-            OutputSummary = $"Stage {stage} completed."
-        });
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task MarkTaskFailedAsync(Guid researchTaskId, Exception exception, CancellationToken cancellationToken)
+    {
+        var task = await db.ResearchTasks.FirstOrDefaultAsync(x => x.Id == researchTaskId, CancellationToken.None);
+        if (task is null)
+        {
+            return;
+        }
+
+        task.Status = ResearchTaskStatus.Failed;
+        task.ErrorMessage = Truncate(exception.Message, 4000);
+        task.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken.IsCancellationRequested ? CancellationToken.None : cancellationToken);
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        return value.Length <= maxLength ? value : value[..maxLength];
     }
 }

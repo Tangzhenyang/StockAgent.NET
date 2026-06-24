@@ -6,10 +6,14 @@ import type { ResearchReport } from '../models';
 export function ReportViewer({
   report,
   isExporting,
+  exportFeedback,
+  exportFailed,
   onExportPdf,
 }: {
   report?: ResearchReport;
   isExporting: boolean;
+  exportFeedback?: string;
+  exportFailed?: boolean;
   onExportPdf: () => void;
 }) {
   if (!report) {
@@ -24,6 +28,7 @@ export function ReportViewer({
           {isExporting ? '导出中' : '导出 PDF'}
         </button>
       </div>
+      {exportFeedback && <p className={exportFailed ? 'reportFeedback error' : 'reportFeedback'}>{exportFeedback}</p>}
       <article dangerouslySetInnerHTML={{ __html: report.html }} />
     </section>
   );

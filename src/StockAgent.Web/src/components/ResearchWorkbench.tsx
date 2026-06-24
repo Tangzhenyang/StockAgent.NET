@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { useMemo, useState } from 'react';
 import {
   createResearchTask,
+  downloadResearchReportPdf,
   exportResearchReportPdf,
   getResearchReport,
   listEvidenceCards,
@@ -11,7 +12,6 @@ import {
 import type { ResearchTask } from '../models';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { ReportViewer } from './ReportViewer';
-import { SettingsPage } from './SettingsPage';
 import { TaskTimeline } from './TaskTimeline';
 
 const completedStatuses = new Set<ResearchTask['status']>(['Ready', 'Completed']);
@@ -25,7 +25,11 @@ export function ResearchWorkbench() {
   const [market, setMarket] = useState<'AShare' | 'HongKong'>('HongKong');
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
 
-  const tasksQuery = useQuery({ queryKey: ['researchTasks'], queryFn: listResearchTasks, refetchInterval: 3000 });
+  const tasksQuery = useQuery({
+    queryKey: ['researchTasks'],
+    queryFn: () => listResearchTasks(),
+    refetchInterval: 3000,
+  });
   const tasks = tasksQuery.data ?? [];
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0],
@@ -53,7 +57,11 @@ export function ResearchWorkbench() {
     },
   });
   const pdfMutation = useMutation({
-    mutationFn: () => exportResearchReportPdf(selectedTask!.id),
+    mutationFn: async () => {
+      const exported = await exportResearchReportPdf(selectedTask!.id);
+      await downloadResearchReportPdf(exported.downloadUrl, exported.fileName);
+      return exported;
+    },
   });
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -101,11 +109,18 @@ export function ResearchWorkbench() {
           <ReportViewer
             report={reportQuery.data}
             isExporting={pdfMutation.isPending}
+            exportFeedback={
+              pdfMutation.isError
+                ? 'PDF 导出失败，请确认后端已安装 Playwright Chromium。'
+                : pdfMutation.isSuccess
+                  ? 'PDF 已开始下载。'
+                  : undefined
+            }
+            exportFailed={pdfMutation.isError}
             onExportPdf={() => pdfMutation.mutate()}
           />
           <div className="rightRail">
             <EvidenceDrawer evidenceCards={evidenceQuery.data ?? []} />
-            <SettingsPage />
           </div>
         </div>
       </section>

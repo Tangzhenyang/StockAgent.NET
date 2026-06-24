@@ -1,14 +1,70 @@
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: stockagent
-      POSTGRES_USER: stockagent
-      POSTGRES_PASSWORD: stockagent
+      POSTGRES_DB: ${POSTGRES_DB:-stockagent}
+      POSTGRES_USER: ${POSTGRES_USER:-stockagent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - stockagent-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stockagent} -d ${POSTGRES_DB:-stockagent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  datasource:
+    build:
+      context: ./services/stock-datasource-gateway
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_API_KEY: ${DATA_SOURCE_API_KEY:-change-me}
+      CACHE_TTL_MARKET_SECONDS: ${CACHE_TTL_MARKET_SECONDS:-300}
+      CACHE_TTL_EVIDENCE_SECONDS: ${CACHE_TTL_EVIDENCE_SECONDS:-3600}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-20}
+      MAX_EVIDENCE_DOCUMENTS: ${MAX_EVIDENCE_DOCUMENTS:-8}
+      MAX_EVIDENCE_TEXT_CHARACTERS: ${MAX_EVIDENCE_TEXT_CHARACTERS:-12000}
+    ports:
+      - "${DATASOURCE_PORT:-8000}:8000"
+
+  api:
+    build:
+      context: .
+      dockerfile: src/StockAgent.Api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__StockAgent: Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockagent};Username=${POSTGRES_USER:-stockagent};Password=${POSTGRES_PASSWORD:-change-me}
+      Database__ApplyMigrationsOnStartup: "true"
+      DataProtection__KeysPath: /var/stockagent/data-protection-keys
+      PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: /usr/bin/chromium
+      Cors__AllowedOrigins__0: ${PUBLIC_WEB_ORIGIN:-http://localhost}
+    ports:
+      - "${API_PORT:-5000}:8080"
+    volumes:
+      - stockagent-api-data:/var/stockagent
+      - stockagent-pdf:/app/wwwroot/pdf
+
+  web:
+    build:
+      context: .
+      dockerfile: src/StockAgent.Web/Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-80}:80"
 
 volumes:
   stockagent-postgres:
+  stockagent-api-data:
+  stockagent-pdf:

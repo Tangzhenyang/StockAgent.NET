@@ -5,6 +5,7 @@ namespace StockAgent.Api.Infrastructure.Queueing;
 
 /// <summary>
 /// Background worker that consumes queued research task IDs and runs the durable orchestrator.
+/// 消费已入队研究任务 ID 并运行持久化协调器的后台工作器。
 /// </summary>
 public sealed class ResearchWorker(
     IResearchTaskQueue queue,

@@ -1,0 +1,183 @@
+# StockAgent.NET Linux Docker 部署说明
+
+本文档说明如何在 Linux 服务器上使用 Docker 部署 StockAgent.NET。
+
+## 容器组成
+
+默认 `docker-compose.yml` 会启动 4 个容器：
+
+| 服务 | 容器作用 | 默认端口 |
+| --- | --- | --- |
+| `web` | React Web UI，Nginx 托管，并反向代理 `/api` 到后端 | `80` |
+| `api` | ASP.NET Core Web API、用户系统、任务编排、PDF 导出、多 Agent 分析 | `5000` |
+| `postgres` | PostgreSQL 16 + pgvector | `5432` |
+| `datasource` | FastAPI 数据源网关，用于行情、财务、公告、证据抓取 | `8000` |
+
+## 服务器准备
+
+在 Linux 服务器安装 Docker 和 Docker Compose 插件：
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+```
+
+重新登录 SSH 后确认：
+
+```bash
+docker version
+docker compose version
+```
+
+## 获取代码
+
+```bash
+git clone https://github.com/Tangzhenyang/StockAgent.NET.git
+cd StockAgent.NET
+```
+
+## 配置环境变量
+
+复制示例配置：
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env`：
+
+```bash
+nano .env
+```
+
+至少修改这些值：
+
+```env
+POSTGRES_PASSWORD=换成强密码
+PUBLIC_WEB_ORIGIN=http://你的服务器IP
+DATA_SOURCE_API_KEY=换成数据源服务访问密钥
+```
+
+如果你的服务器开放域名，`PUBLIC_WEB_ORIGIN` 可写成：
+
+```env
+PUBLIC_WEB_ORIGIN=https://your-domain.com
+```
+
+## 启动服务
+
+```bash
+docker compose up -d --build
+```
+
+查看状态：
+
+```bash
+docker compose ps
+```
+
+查看日志：
+
+```bash
+docker compose logs -f api
+docker compose logs -f web
+docker compose logs -f datasource
+```
+
+API 容器启动时会根据：
+
+```env
+Database__ApplyMigrationsOnStartup=true
+```
+
+自动执行 EF Core 数据库迁移，首次启动会创建完整表结构。
+
+## 访问系统
+
+浏览器打开：
+
+```text
+http://你的服务器IP
+```
+
+如果修改了 `WEB_PORT`，例如 `WEB_PORT=8080`，则访问：
+
+```text
+http://你的服务器IP:8080
+```
+
+## 首次使用配置
+
+1. 打开 Web UI。
+2. 注册一个用户。
+3. 登录后进入配置页面。
+4. 配置大模型：
+   - Provider
+   - Base URL
+   - Model
+   - API Key
+5. 配置数据源：
+   - 行情/财务 Base URL：`http://datasource:8000`
+   - 行情/财务 API Key：填写 `.env` 中的 `DATA_SOURCE_API_KEY`
+   - 公告/证据 Base URL：`http://datasource:8000`
+   - 公告/证据 API Key：填写 `.env` 中的 `DATA_SOURCE_API_KEY`
+6. 保存配置后，用 A 股或港股代码发起研究。
+
+注意：数据源 Base URL 填 `http://datasource:8000`，这是 Docker Compose 内部网络地址，由 API 容器访问，不是浏览器直接访问的地址。
+
+## 常用运维命令
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+重启服务：
+
+```bash
+docker compose restart
+```
+
+更新代码后重新部署：
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+查看数据库数据卷：
+
+```bash
+docker volume ls | grep stockagent
+```
+
+备份 PostgreSQL：
+
+```bash
+docker compose exec postgres pg_dump -U stockagent stockagent > stockagent_backup.sql
+```
+
+恢复 PostgreSQL：
+
+```bash
+cat stockagent_backup.sql | docker compose exec -T postgres psql -U stockagent stockagent
+```
+
+## 使用外部 PostgreSQL
+
+如果你不想使用 compose 内置的 `postgres` 容器，可以：
+
+1. 保留 `api`、`web`、`datasource` 服务。
+2. 修改 `api` 服务的 `ConnectionStrings__StockAgent` 为外部连接字符串。
+3. 删除或不启动 `postgres` 服务。
+
+示例：
+
+```yaml
+ConnectionStrings__StockAgent: Host=你的PG地址;Port=5432;Database=stockagent;Username=admin;Password=你的密码
+```
+
+不要把真实密码提交到 GitHub；生产密码只放在服务器 `.env` 或服务器密钥管理系统里。

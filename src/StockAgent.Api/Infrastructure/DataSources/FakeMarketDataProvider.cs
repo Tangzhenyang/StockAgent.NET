@@ -1,14 +1,19 @@
 using StockAgent.Api.Domain;
+using StockAgent.Api.Infrastructure.Settings;
 
 namespace StockAgent.Api.Infrastructure.DataSources;
 
 /// <summary>
 /// Deterministic market data provider used to keep the MVP workflow testable before real provider selection.
+/// 用于在选择真实提供程序之前保持 MVP 工作流可测试的确定性市场数据提供器。
 /// </summary>
 public sealed class FakeMarketDataProvider : IMarketDataProvider
 {
     /// <inheritdoc />
-    public Task<MarketDataSnapshot> GetSnapshotAsync(string ticker, CancellationToken cancellationToken)
+    public Task<MarketDataSnapshot> GetSnapshotAsync(
+        string ticker,
+        DataSourceRuntimeSettings settings,
+        CancellationToken cancellationToken)
     {
         var market = ticker.EndsWith(".HK", StringComparison.OrdinalIgnoreCase) ? Market.HongKong : Market.AShare;
         var companyName = market == Market.HongKong ? "腾讯控股" : "示例公司";

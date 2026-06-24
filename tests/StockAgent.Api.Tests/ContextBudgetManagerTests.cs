@@ -6,11 +6,13 @@ namespace StockAgent.Api.Tests;
 
 /// <summary>
 /// Verifies that evidence packs are capped before model calls.
+/// 验证证据包在模型调用前会被限制大小。
 /// </summary>
 public sealed class ContextBudgetManagerTests
 {
     /// <summary>
     /// The highest relevance evidence cards are kept within the requested limit.
+    /// 保留相关性最高的证据卡，并控制在请求的限制内。
     /// </summary>
     [Fact]
     public void SelectEvidence_KeepsHighestRelevanceCards()

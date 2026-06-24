@@ -1,12 +1,19 @@
+using StockAgent.Api.Infrastructure.Settings;
+
 namespace StockAgent.Api.Infrastructure.DataSources;
 
 /// <summary>
 /// Deterministic web research provider that returns representative public evidence documents.
+/// 返回具有代表性的公开证据文档的确定性网页研究提供器。
 /// </summary>
 public sealed class FakeWebResearchProvider : IWebResearchProvider
 {
     /// <inheritdoc />
-    public Task<IReadOnlyList<WebEvidenceDocument>> SearchAsync(string ticker, string companyName, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<WebEvidenceDocument>> SearchAsync(
+        string ticker,
+        string companyName,
+        DataSourceRuntimeSettings settings,
+        CancellationToken cancellationToken)
     {
         IReadOnlyList<WebEvidenceDocument> documents =
         [

@@ -8,11 +8,13 @@ using StockAgent.Api.Infrastructure.DataSources;
 using StockAgent.Api.Infrastructure.Documents;
 using StockAgent.Api.Infrastructure.Persistence;
 using StockAgent.Api.Infrastructure.Reports;
+using StockAgent.Api.Infrastructure.Settings;
 
 namespace StockAgent.Api.Infrastructure.Research;
 
 /// <summary>
 /// Durable manager for the stock research pipeline. It owns stage transitions and delegates specialized work to providers.
+/// 股票研究流水线的持久化管理器，负责阶段切换并将专门工作委托给提供器。
 /// </summary>
 public sealed class ResearchOrchestrator(
     StockAgentDbContext db,
@@ -22,30 +24,45 @@ public sealed class ResearchOrchestrator(
     ContextBudgetManager contextBudgetManager,
     IResearchAnalysisService analysisService,
     ReportGenerator reportGenerator,
+    UserSettingsService userSettingsService,
     ILogger<ResearchOrchestrator> logger)
 {
     /// <summary>
     /// Executes the first runnable research pipeline for one queued task.
+    /// 为一个已入队任务执行首个可运行的研究流水线。
     /// </summary>
     public async Task RunAsync(Guid researchTaskId, CancellationToken cancellationToken)
     {
         var task = await db.ResearchTasks.FirstAsync(x => x.Id == researchTaskId, cancellationToken);
+        var dataSourceSettings = await userSettingsService.GetDataSourceRuntimeSettingsAsync(task.UserId, cancellationToken);
         await SetStatusAsync(task, ResearchTaskStatus.CollectingData, ResearchStage.CollectStructuredData, 10, cancellationToken);
 
-        var snapshot = await marketDataProvider.GetSnapshotAsync(task.Ticker, cancellationToken);
+        var snapshot = await marketDataProvider.GetSnapshotAsync(task.Ticker, dataSourceSettings, cancellationToken);
         task.CompanyName = snapshot.CompanyName;
 
         await SetStatusAsync(task, ResearchTaskStatus.CollectingData, ResearchStage.CollectPublicEvidence, 30, cancellationToken);
-        var documents = await webResearchProvider.SearchAsync(task.Ticker, snapshot.CompanyName, cancellationToken);
+        var documents = await webResearchProvider.SearchAsync(
+            task.Ticker,
+            snapshot.CompanyName,
+            dataSourceSettings,
+            cancellationToken);
 
-        logger.LogInformation("Collected {DocumentCount} fake evidence documents for {Ticker}", documents.Count, task.Ticker);
+        logger.LogInformation("Collected {DocumentCount} evidence documents for {Ticker}", documents.Count, task.Ticker);
 
         await SetStatusAsync(task, ResearchTaskStatus.IngestingDocuments, ResearchStage.IngestAndIndexDocuments, 55, cancellationToken);
         var evidenceCards = await IngestDocumentsAsync(task, documents, cancellationToken);
 
         await SetStatusAsync(task, ResearchTaskStatus.Analyzing, ResearchStage.AnalyzeWithSemanticKernel, 75, cancellationToken);
-        var selectedEvidence = contextBudgetManager.SelectEvidence(evidenceCards, maxCards: 30);
-        var analysis = await analysisService.AnalyzeAsync(snapshot, selectedEvidence, cancellationToken);
+        var researchSettings = await userSettingsService.GetResearchSettingsAsync(task.UserId, cancellationToken);
+        var modelSettings = await userSettingsService.GetModelRuntimeSettingsAsync(task.UserId, cancellationToken);
+        var selectedEvidence = contextBudgetManager.SelectEvidence(evidenceCards, researchSettings.MaxEvidenceCards);
+        var analysis = await analysisService.AnalyzeAsync(
+            task.Id,
+            snapshot,
+            selectedEvidence,
+            modelSettings,
+            task.Language,
+            cancellationToken);
 
         await SetStatusAsync(task, ResearchTaskStatus.GeneratingReport, ResearchStage.GenerateReport, 90, cancellationToken);
         var generatedReport = reportGenerator.Generate(snapshot, analysis, selectedEvidence);

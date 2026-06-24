@@ -4,6 +4,7 @@ namespace StockAgent.Api.Infrastructure.Queueing;
 
 /// <summary>
 /// Channel-backed in-memory queue used by the first-version modular monolith.
+/// 首个版本模块化单体使用的基于 Channel 的内存队列。
 /// </summary>
 public sealed class ResearchTaskQueue : IResearchTaskQueue
 {

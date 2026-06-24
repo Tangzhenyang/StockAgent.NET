@@ -1,35 +1,121 @@
-using Microsoft.SemanticKernel;
+using System.Diagnostics;
 using StockAgent.Api.Domain;
+using StockAgent.Api.Features.UserSettings;
+using StockAgent.Api.Infrastructure.Ai.Agents;
+using StockAgent.Api.Infrastructure.Ai.Chat;
 using StockAgent.Api.Infrastructure.DataSources;
+using StockAgent.Api.Infrastructure.Persistence;
 
 namespace StockAgent.Api.Infrastructure.Ai;
 
 /// <summary>
-/// First-version analysis service that owns the Semantic Kernel boundary while returning deterministic output for tests.
+/// Fixed-flow multi-agent analysis service backed by Semantic Kernel chat completion.
+/// 基于 Semantic Kernel 聊天补全的固定流程多 Agent 分析服务。
 /// </summary>
-public sealed class SemanticKernelResearchAnalysisService(Kernel kernel, ILogger<SemanticKernelResearchAnalysisService> logger)
-    : IResearchAnalysisService
+public sealed class SemanticKernelResearchAnalysisService(
+    IModelChatClient chatClient,
+    AgentContextBudgeter contextBudgeter,
+    StockAgentDbContext db,
+    ILogger<SemanticKernelResearchAnalysisService> logger) : IResearchAnalysisService
 {
     /// <inheritdoc />
-    public Task<AiAnalysisResult> AnalyzeAsync(
+    public async Task<AiAnalysisResult> AnalyzeAsync(
+        Guid researchTaskId,
         MarketDataSnapshot marketData,
         IReadOnlyList<EvidenceCard> evidenceCards,
+        ModelRuntimeSettings modelSettings,
+        string language,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(kernel);
         logger.LogInformation(
-            "Semantic Kernel boundary invoked for {Ticker} with {EvidenceCount} evidence cards.",
+            "Starting fixed-flow multi-agent analysis for {Ticker} with {EvidenceCount} evidence cards.",
             marketData.Ticker,
             evidenceCards.Count);
 
-        var score = marketData.PeRatio < 25 && marketData.RevenueGrowthPercent > 0 ? 76 : 62;
-        var result = new AiAnalysisResult(
-            score,
-            "中等",
-            marketData.PeRatio < 20 ? "估值相对合理" : "估值需要结合增长验证",
-            $"{marketData.CompanyName} 基本面保持稳定，证据数量为 {evidenceCards.Count} 条。",
-            ["收入增长延续", "利润率保持稳定", "监管和宏观需求未显著恶化"]);
+        var marketAgent = new MarketFinancialAgent(chatClient, modelSettings);
+        var evidenceAgent = new EvidenceFilingAgent(chatClient, modelSettings);
+        var marketInput = contextBudgeter.BuildMarketInput(marketData, language);
+        var evidenceInput = contextBudgeter.BuildEvidenceInput(marketData, evidenceCards, language);
+        var marketTask = RunMeasuredAsync(marketAgent, marketInput, modelSettings, cancellationToken);
+        var evidenceTask = RunMeasuredAsync(evidenceAgent, evidenceInput, modelSettings, cancellationToken);
+        await Task.WhenAll(marketTask, evidenceTask);
+        AgentOutputValidators.ValidateMarket(marketTask.Result.Output);
+        AgentOutputValidators.ValidateEvidence(evidenceTask.Result.Output, evidenceInput);
+        await SaveInvocationsAsync(researchTaskId, [marketTask.Result.Invocation, evidenceTask.Result.Invocation], cancellationToken);
 
-        return Task.FromResult(result);
+        var synthesisAgent = new SynthesisReportAgent(chatClient, modelSettings);
+        var synthesisInput = contextBudgeter.BuildSynthesisInput(
+            marketData,
+            marketTask.Result.Output,
+            evidenceTask.Result.Output,
+            language);
+        var synthesisRun = await RunMeasuredAsync(synthesisAgent, synthesisInput, modelSettings, cancellationToken);
+        AgentOutputValidators.ValidateSynthesis(synthesisRun.Output);
+        await SaveInvocationsAsync(researchTaskId, [synthesisRun.Invocation], cancellationToken);
+
+        var reviewAgent = new ReviewAgent(chatClient, modelSettings);
+        var reviewInput = contextBudgeter.BuildReviewInput(
+            marketData,
+            synthesisRun.Output,
+            evidenceTask.Result.Output,
+            language);
+        var reviewRun = await RunMeasuredAsync(reviewAgent, reviewInput, modelSettings, cancellationToken);
+        await SaveInvocationsAsync(researchTaskId, [reviewRun.Invocation], cancellationToken);
+
+        if (!reviewRun.Output.Approved)
+        {
+            throw new InvalidOperationException($"Report review failed: {string.Join("; ", reviewRun.Output.Issues)}");
+        }
+
+        return new AiAnalysisResult(
+            synthesisRun.Output.OverallScore,
+            synthesisRun.Output.RiskLevel,
+            synthesisRun.Output.ValuationView,
+            synthesisRun.Output.Summary,
+            synthesisRun.Output.KeyAssumptions,
+            synthesisRun.Output.Markdown,
+            [
+                "MarketFinancialAgent:Succeeded",
+                "EvidenceFilingAgent:Succeeded",
+                "SynthesisReportAgent:Succeeded",
+                "ReviewAgent:Approved"
+            ]);
     }
+
+    private static async Task<AgentRunResult<TOutput>> RunMeasuredAsync<TInput, TOutput>(
+        IResearchAgent<TInput, TOutput> agent,
+        TInput input,
+        ModelRuntimeSettings modelSettings,
+        CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.GetTimestamp();
+        var output = await agent.RunAsync(input, cancellationToken);
+        var durationMs = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        return new AgentRunResult<TOutput>(
+            output,
+            new ModelInvocation
+            {
+                StepName = agent.Name,
+                Provider = modelSettings.Provider,
+                ModelName = modelSettings.Model,
+                DurationMs = durationMs,
+                Status = "Succeeded"
+            });
+    }
+
+    private async Task SaveInvocationsAsync(
+        Guid researchTaskId,
+        IReadOnlyList<ModelInvocation> invocations,
+        CancellationToken cancellationToken)
+    {
+        foreach (var invocation in invocations)
+        {
+            invocation.ResearchTaskId = researchTaskId;
+        }
+
+        db.ModelInvocations.AddRange(invocations);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private sealed record AgentRunResult<TOutput>(TOutput Output, ModelInvocation Invocation);
 }

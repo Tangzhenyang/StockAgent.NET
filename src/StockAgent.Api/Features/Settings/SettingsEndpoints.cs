@@ -2,10 +2,11 @@ namespace StockAgent.Api.Features.Settings;
 
 /// <summary>
 /// Endpoints for first-version provider and research settings.
+/// 首个版本提供器和研究设置的端点。
 /// </summary>
 public static class SettingsEndpoints
 {
-    /// <summary>Maps settings endpoints.</summary>
+    /// <summary>Maps settings endpoints. 映射设置端点。</summary>
     public static IEndpointRouteBuilder MapSettingsEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/settings/providers", () => Results.Ok(new { openAiEnabled = false, compatibleEnabled = true }))

@@ -29,15 +29,31 @@ const labels: Record<ResearchTaskStatus, string> = {
  * Displays first-version research progress as a compact horizontal timeline.
  */
 export function TaskTimeline({ status }: { status: ResearchTaskStatus }) {
-  const activeIndex = Math.max(0, stages.indexOf(status));
+  const activeIndex = status === 'Failed' ? 0 : Math.max(0, stages.indexOf(status));
 
   return (
     <ol className="timeline" aria-label="研究进度">
-      {stages.map((stage, index) => (
-        <li key={stage} className={index <= activeIndex ? 'timelineItem active' : 'timelineItem'}>
-          {labels[stage]}
-        </li>
-      ))}
+      {stages.map((stage, index) => {
+        const state = getStepState(status, index, activeIndex);
+        return (
+          <li key={stage} className={`timelineItem ${state}`} aria-current={state === 'current' ? 'step' : undefined}>
+            <span className="timelineMarker" aria-hidden="true" />
+            <span className="timelineLabel">{labels[stage]}</span>
+          </li>
+        );
+      })}
     </ol>
   );
+}
+
+function getStepState(status: ResearchTaskStatus, index: number, activeIndex: number) {
+  if (status === 'Failed' && index === activeIndex) {
+    return 'failed';
+  }
+
+  if (status === 'Completed' || index < activeIndex) {
+    return 'done';
+  }
+
+  return index === activeIndex ? 'current' : 'pending';
 }

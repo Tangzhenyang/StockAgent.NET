@@ -57,7 +57,14 @@ public sealed class ConfiguredMarketDataProvider(
 
     private static Uri CreateUri(string baseUrl, string relativePath, IReadOnlyDictionary<string, string> query)
     {
-        var builder = new UriBuilder($"{baseUrl.TrimEnd('/')}/{relativePath.TrimStart('/')}");
+        var normalizedBaseUrl = baseUrl.TrimEnd('/');
+        var normalizedRelativePath = relativePath.TrimStart('/');
+        if (!normalizedBaseUrl.EndsWith("/api", StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedRelativePath = $"api/{normalizedRelativePath}";
+        }
+
+        var builder = new UriBuilder($"{normalizedBaseUrl}/{normalizedRelativePath}");
         builder.Query = string.Join("&", query.Select(x =>
             $"{Uri.EscapeDataString(x.Key)}={Uri.EscapeDataString(x.Value)}"));
         return builder.Uri;

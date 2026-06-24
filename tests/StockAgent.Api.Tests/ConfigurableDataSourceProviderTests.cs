@@ -58,6 +58,44 @@ public sealed class ConfigurableDataSourceProviderTests
     }
 
     /// <summary>
+    /// Custom HTTP market data providers accept a service root Base URL and still call the FastAPI /api route.
+    /// 自定义 HTTP 行情数据源允许填写服务根地址，并仍然调用 FastAPI 的 /api 路由。
+    /// </summary>
+    [Fact]
+    public async Task ConfiguredMarketDataProvider_AddsApiPrefixWhenBaseUrlIsServiceRoot()
+    {
+        var httpClient = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            request.RequestUri!.AbsolutePath.Should().Be("/api/market/snapshot");
+            var json = """
+                {
+                  "ticker": "00700.HK",
+                  "market": "HongKong",
+                  "companyName": "腾讯控股",
+                  "lastPrice": 320.5,
+                  "marketCap": 3000000000000,
+                  "peRatio": 18.4,
+                  "revenueGrowthPercent": 8.2,
+                  "netMarginPercent": 24.5
+                }
+                """;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+        }));
+        var provider = new ConfiguredMarketDataProvider(
+            httpClient,
+            new FakeMarketDataProvider(),
+            NullLogger<ConfiguredMarketDataProvider>.Instance);
+        var settings = CreateRuntimeSettings(marketBaseUrl: "http://datasource:8000", marketApiKey: "market-key");
+
+        var snapshot = await provider.GetSnapshotAsync("00700.HK", settings, CancellationToken.None);
+
+        snapshot.CompanyName.Should().Be("腾讯控股");
+    }
+
+    /// <summary>
     /// Custom HTTP web research providers expose a stable wrapper contract for announcement/search services.
     /// 自定义 HTTP 网页研究提供器为公告/搜索服务暴露稳定包装契约。
     /// </summary>
@@ -98,6 +136,43 @@ public sealed class ConfigurableDataSourceProviderTests
         documents.Should().ContainSingle();
         documents[0].Title.Should().Be("腾讯控股 年报");
         documents[0].SourceType.Should().Be("annual-report");
+    }
+
+    /// <summary>
+    /// Custom HTTP web research providers accept a service root Base URL and still call the FastAPI /api route.
+    /// 自定义 HTTP 证据数据源允许填写服务根地址，并仍然调用 FastAPI 的 /api 路由。
+    /// </summary>
+    [Fact]
+    public async Task ConfiguredWebResearchProvider_AddsApiPrefixWhenBaseUrlIsServiceRoot()
+    {
+        var httpClient = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            request.RequestUri!.AbsolutePath.Should().Be("/api/web/search");
+            var json = """
+                [
+                  {
+                    "url": "https://example.com/report.pdf",
+                    "title": "腾讯控股 年报",
+                    "sourceType": "annual-report",
+                    "publishedAt": "2026-03-20T00:00:00+00:00",
+                    "text": "收入增长，经营利润率稳定。"
+                  }
+                ]
+                """;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+        }));
+        var provider = new ConfiguredWebResearchProvider(
+            httpClient,
+            new FakeWebResearchProvider(),
+            NullLogger<ConfiguredWebResearchProvider>.Instance);
+        var settings = CreateRuntimeSettings(webBaseUrl: "http://datasource:8000", webApiKey: "web-key");
+
+        var documents = await provider.SearchAsync("00700.HK", "腾讯控股", settings, CancellationToken.None);
+
+        documents.Should().ContainSingle();
     }
 
     private static DataSourceRuntimeSettings CreateRuntimeSettings(

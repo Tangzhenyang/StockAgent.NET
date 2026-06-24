@@ -13,6 +13,8 @@
 | `postgres` | PostgreSQL 16 + pgvector | `5432` |
 | `datasource` | FastAPI 数据源网关，用于行情、财务、公告、证据抓取 | `8000` |
 
+如果你已经在服务器上单独部署了 PostgreSQL，可以使用 `docker-compose.external-pg.yml`，只启动 `web`、`api`、`datasource`，不启动内置 `postgres` 容器。
+
 ## 服务器准备
 
 在 Linux 服务器安装 Docker 和 Docker Compose 插件：
@@ -60,16 +62,73 @@ PUBLIC_WEB_ORIGIN=http://你的服务器IP
 DATA_SOURCE_API_KEY=换成数据源服务访问密钥
 ```
 
+如果你使用已经部署好的外部 PostgreSQL，还需要修改：
+
+```env
+EXTERNAL_POSTGRES_HOST=你的PG服务器IP或域名
+EXTERNAL_POSTGRES_PORT=5432
+EXTERNAL_POSTGRES_DB=stockagent
+EXTERNAL_POSTGRES_USER=admin
+EXTERNAL_POSTGRES_PASSWORD=你的PG密码
+```
+
 如果你的服务器开放域名，`PUBLIC_WEB_ORIGIN` 可写成：
 
 ```env
 PUBLIC_WEB_ORIGIN=https://your-domain.com
 ```
 
-## 启动服务
+## 启动服务：使用内置 PostgreSQL
+
+如果希望由 Docker Compose 一起启动 PostgreSQL、API、Web、数据源服务，执行：
 
 ```bash
 docker compose up -d --build
+```
+
+该模式会启动：
+
+- `postgres`
+- `api`
+- `web`
+- `datasource`
+
+## 启动服务：使用已有 PostgreSQL
+
+如果你已经在 Linux 服务器上部署好了 PostgreSQL，并且数据库已开启 `pgvector`，推荐使用外部 PG override 文件：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.external-pg.yml up -d --build api web datasource
+```
+
+该命令只启动：
+
+- `api`
+- `web`
+- `datasource`
+
+不会启动 compose 内置的 `postgres` 容器。
+
+API 容器会使用 `.env` 中的这些变量连接外部 PostgreSQL：
+
+```env
+EXTERNAL_POSTGRES_HOST=你的PG服务器IP或域名
+EXTERNAL_POSTGRES_PORT=5432
+EXTERNAL_POSTGRES_DB=stockagent
+EXTERNAL_POSTGRES_USER=admin
+EXTERNAL_POSTGRES_PASSWORD=你的PG密码
+```
+
+如果 `stockagent` 数据库不存在，需要先在 PostgreSQL 里创建：
+
+```bash
+createdb -h 你的PG服务器IP -p 5432 -U admin stockagent
+```
+
+如果服务器没有安装 `createdb`，也可以进入 PostgreSQL 容器或使用任意 PostgreSQL 客户端执行：
+
+```sql
+create database stockagent;
 ```
 
 查看状态：
@@ -148,6 +207,13 @@ git pull
 docker compose up -d --build
 ```
 
+如果使用外部 PostgreSQL，更新后执行：
+
+```bash
+git pull
+docker compose -f docker-compose.yml -f docker-compose.external-pg.yml up -d --build api web datasource
+```
+
 查看数据库数据卷：
 
 ```bash
@@ -166,18 +232,12 @@ docker compose exec postgres pg_dump -U stockagent stockagent > stockagent_backu
 cat stockagent_backup.sql | docker compose exec -T postgres psql -U stockagent stockagent
 ```
 
-## 使用外部 PostgreSQL
+## 外部 PostgreSQL 注意事项
 
-如果你不想使用 compose 内置的 `postgres` 容器，可以：
+使用外部 PostgreSQL 时，不要修改 `docker-compose.yml` 里的连接串，也不要把真实密码写进仓库文件。只需要在服务器 `.env` 里填写 `EXTERNAL_POSTGRES_*` 变量，然后使用：
 
-1. 保留 `api`、`web`、`datasource` 服务。
-2. 修改 `api` 服务的 `ConnectionStrings__StockAgent` 为外部连接字符串。
-3. 删除或不启动 `postgres` 服务。
-
-示例：
-
-```yaml
-ConnectionStrings__StockAgent: Host=你的PG地址;Port=5432;Database=stockagent;Username=admin;Password=你的密码
+```bash
+docker compose -f docker-compose.yml -f docker-compose.external-pg.yml up -d --build api web datasource
 ```
 
-不要把真实密码提交到 GitHub；生产密码只放在服务器 `.env` 或服务器密钥管理系统里。
+生产密码只放在服务器 `.env` 或服务器密钥管理系统里，不要提交到 GitHub。

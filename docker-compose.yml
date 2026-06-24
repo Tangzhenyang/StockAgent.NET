@@ -35,9 +35,6 @@ services:
       context: .
       dockerfile: src/StockAgent.Api/Dockerfile
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080

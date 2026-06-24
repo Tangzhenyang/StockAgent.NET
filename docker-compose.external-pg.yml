@@ -1,0 +1,8 @@
+services:
+  postgres:
+    profiles:
+      - internal-postgres
+
+  api:
+    environment:
+      ConnectionStrings__StockAgent: Host=${EXTERNAL_POSTGRES_HOST};Port=${EXTERNAL_POSTGRES_PORT:-5432};Database=${EXTERNAL_POSTGRES_DB:-stockagent};Username=${EXTERNAL_POSTGRES_USER};Password=${EXTERNAL_POSTGRES_PASSWORD}

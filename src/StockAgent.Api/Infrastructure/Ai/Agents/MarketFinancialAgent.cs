@@ -29,6 +29,7 @@ public sealed class MarketFinancialAgent(
         你只分析输入中的结构化行情、估值、市值、收入增长和净利率。
         不得引用未提供的数据，不得给出直接买卖建议。
         必须只输出 JSON，字段为 score, valuationView, strengths, risks, followUpQuestions。
+        score 必须是 0 到 100 的整数数字，不要输出百分号、单位或解释文本。
         """;
     }
 

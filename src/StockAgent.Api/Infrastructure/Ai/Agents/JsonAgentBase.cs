@@ -38,6 +38,7 @@ public abstract class JsonAgentBase<TInput, TOutput>(
     private static JsonSerializerOptions CreateJsonOptions()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new FlexibleIntJsonConverter());
         options.Converters.Add(new EvidenceCitationJsonConverter());
         return options;
     }

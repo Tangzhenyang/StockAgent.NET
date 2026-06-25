@@ -1,3 +1,5 @@
+import pytest
+
 from app.models.contracts import MarketSnapshotResponse
 from app.providers import akshare_market
 from app.services import market_service
@@ -6,6 +8,13 @@ from app.utils.ticker import normalize_ticker
 
 def setup_function():
     market_service._market_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def disable_eastmoney_realtime_quote(monkeypatch):
+    """Disable real network quote calls unless a test explicitly overrides them. 默认关闭真实网络行情调用，避免测试打外网。"""
+
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_quote_row", lambda _normalized: None)
 
 
 def test_market_snapshot_contract(client, auth_headers, monkeypatch):
@@ -143,6 +152,66 @@ def test_a_share_snapshot_prefers_realtime_spot_over_daily_close(monkeypatch):
     assert snapshot.last_price == 700.25
     assert snapshot.quote_source == "akshare-a-spot-em"
     assert snapshot.price_freshness == "intraday-delayed"
+
+
+def test_a_share_snapshot_prefers_single_stock_realtime_over_daily_close(monkeypatch):
+    pd = __import__("pandas")
+
+    def fake_eastmoney_realtime(normalized):
+        return {
+            "代码": normalized.ticker,
+            "名称": "江波龙",
+            "最新价": 659.01,
+            "总市值": 278_800_000_000,
+            "市盈率-动态": 67.3,
+            "_quote_source": "eastmoney-push2-stock-get",
+            "_price_freshness": "intraday-delayed",
+        }
+
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_quote_row", fake_eastmoney_realtime, raising=False)
+
+    class FakeAk:
+        @staticmethod
+        def stock_zh_a_spot_em():
+            raise RuntimeError("spot list unavailable")
+
+        @staticmethod
+        def stock_zh_a_spot():
+            raise RuntimeError("sina list unavailable")
+
+        @staticmethod
+        def stock_zh_a_daily(symbol, start_date, end_date, adjust):
+            return pd.DataFrame([{"close": 619.98, "outstanding_share": 282_000_000}])
+
+        @staticmethod
+        def stock_financial_analysis_indicator_em(symbol, indicator):
+            return pd.DataFrame([{"EPSJB": 5.0, "TOTALOPERATEREVETZ": 132.7, "XSJLL": 40.1}])
+
+        @staticmethod
+        def stock_profile_cninfo(symbol):
+            return pd.DataFrame([{"A股简称": "江波龙"}])
+
+    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
+
+    assert snapshot.last_price == 659.01
+    assert snapshot.quote_source == "eastmoney-push2-stock-get"
+    assert snapshot.price_freshness == "intraday-delayed"
+
+
+def test_find_first_row_matches_prefixed_and_suffixed_a_share_codes():
+    pd = __import__("pandas")
+    frame = pd.DataFrame(
+        [
+            {"代码": "SZ301308", "名称": "江波龙", "最新价": 659.01},
+            {"代码": "600519.SH", "名称": "贵州茅台", "最新价": 1241.41},
+        ]
+    )
+
+    sz_row = akshare_market._find_first_row(frame, ["代码"], "301308")
+    sh_row = akshare_market._find_first_row(frame, ["代码"], "600519")
+
+    assert sz_row["名称"] == "江波龙"
+    assert sh_row["名称"] == "贵州茅台"
 
 
 def test_a_share_financial_loader_uses_latest_sina_row():

@@ -411,6 +411,46 @@ public sealed class MultiAgentAnalysisServiceTests
         result.ReportMarkdown.Should().Contain("行业景气度");
     }
 
+    /// <summary>
+    /// IndustryResearchAgent tolerates object-shaped industry views from LLMs.
+    /// IndustryResearchAgent 可以容忍模型把行业观点返回成对象。
+    /// </summary>
+    [Fact]
+    public async Task IndustryResearchAgent_ParsesObjectIndustryViewModelOutput()
+    {
+        var client = new FakeModelChatClient("""
+        {
+          "industryView": {
+            "summary": "存储行业价格修复需要跟踪",
+            "cyclePosition": "景气度待验证"
+          },
+          "opportunities": ["AI 服务器需求拉动"],
+          "risks": ["价格波动"],
+          "newsHighlights": ["存储相关新闻"],
+          "followUpQuestions": []
+        }
+        """);
+        var agent = new IndustryResearchAgent(client);
+
+        var output = await agent.RunAsync(
+            new IndustryResearchAgentInput(
+                CreateSnapshot(),
+                new IndustryResearchSnapshot(
+                    "301308",
+                    "江波龙",
+                    "半导体存储",
+                    ["半导体", "存储芯片"],
+                    ["DRAM", "NAND Flash"],
+                    "test",
+                    DateTimeOffset.UtcNow,
+                    []),
+                "zh-CN"),
+            CancellationToken.None);
+
+        output.IndustryView.Should().Contain("存储行业价格修复需要跟踪");
+        output.Opportunities.Should().Contain("AI 服务器需求拉动");
+    }
+
     internal sealed class FakeModelChatClient(string json) : IModelChatClient
     {
         public Task<string> CompleteJsonAsync(

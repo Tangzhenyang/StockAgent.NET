@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 from math import isfinite
 from typing import Any
 
+import httpx
+
 from app.models.contracts import MarketSnapshotResponse
 from app.providers.errors import DataSourceProviderError
 from app.utils.ticker import NormalizedTicker
@@ -78,6 +80,7 @@ def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnaps
 
     quote_row = _first_successful_row(
         [
+            lambda: _load_a_share_eastmoney_quote_row(normalized),
             lambda: _with_quote_meta(
                 _find_first_row(ak.stock_zh_a_spot_em(), ["代码", "code"], normalized.ticker),
                 "akshare-a-spot-em",
@@ -199,6 +202,59 @@ def _a_share_prefixed_symbol(ticker: str) -> str:
     return f"{prefix}{ticker}"
 
 
+def _load_a_share_eastmoney_quote_row(normalized: NormalizedTicker) -> dict[str, Any] | None:
+    """Load A-share intraday delayed quote from Eastmoney single-stock API. 从东方财富单股接口加载 A 股盘中延迟行情。"""
+
+    secid = _eastmoney_secid(normalized.ticker)
+    response = httpx.get(
+        "https://push2.eastmoney.com/api/qt/stock/get",
+        params={
+            "secid": secid,
+            "fields": "f43,f57,f58,f116,f162",
+        },
+        timeout=8,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        return None
+
+    latest_price = _eastmoney_scaled_number(data.get("f43"))
+    if latest_price == 0:
+        return None
+
+    return {
+        "代码": str(data.get("f57") or normalized.ticker),
+        "名称": str(data.get("f58") or "A股公司"),
+        "最新价": latest_price,
+        "总市值": _eastmoney_plain_number(data.get("f116")),
+        "市盈率-动态": _eastmoney_scaled_number(data.get("f162")),
+        "_quote_source": "eastmoney-push2-stock-get",
+        "_price_freshness": "intraday-delayed",
+    }
+
+
+def _eastmoney_secid(ticker: str) -> str:
+    """Build Eastmoney secid for A-share tickers. 构建东方财富 A 股 secid。"""
+
+    exchange_id = "1" if ticker.startswith(("6", "9")) else "0"
+    return f"{exchange_id}.{ticker}"
+
+
+def _eastmoney_scaled_number(value: Any) -> float:
+    """Convert Eastmoney cent-scaled quote fields into normal decimals. 将东方财富按 100 缩放的行情字段转成普通数值。"""
+
+    number = _to_float(value, required_name="eastmoneyScaledValue", required=False)
+    return number / 100 if abs(number) >= 100 else number
+
+
+def _eastmoney_plain_number(value: Any) -> float:
+    """Convert Eastmoney plain numeric fields. 转换东方财富普通数值字段。"""
+
+    return _to_float(value, required_name="eastmoneyPlainValue", required=False)
+
+
 def _a_share_pe_ratio(
     last_price: float,
     quote_row: dict[str, Any],
@@ -316,13 +372,21 @@ def _find_first_row(frame: Any, candidate_columns: list[str], expected_code: str
 
     for column in candidate_columns:
         if column in frame.columns:
-            values = frame[column].astype(str).str.upper()
-            expected = expected_code.upper()
-            matches = frame[(values == expected) | (values.str.zfill(len(expected)) == expected)]
+            expected = _normalize_code_for_match(expected_code)
+            values = frame[column].astype(str).map(_normalize_code_for_match)
+            matches = frame[values == expected]
             if not matches.empty:
                 return matches.iloc[0].to_dict()
 
     return None
+
+
+def _normalize_code_for_match(value: Any) -> str:
+    """Normalize provider code values like SZ301308 or 600519.SH before matching. 规范化 SZ301308 或 600519.SH 等代码后再匹配。"""
+
+    text = str(value).strip().upper()
+    digits = "".join(character for character in text if character.isdigit())
+    return digits.zfill(6) if len(digits) <= 6 else digits[-6:]
 
 
 def _first_number(

@@ -21,7 +21,7 @@ def get_settings() -> Settings:
 
     return Settings(
         data_source_api_key=os.getenv("DATA_SOURCE_API_KEY", "dev-secret"),
-        cache_ttl_market_seconds=_get_int("CACHE_TTL_MARKET_SECONDS", 300),
+        cache_ttl_market_seconds=_get_int("CACHE_TTL_MARKET_SECONDS", 60),
         cache_ttl_evidence_seconds=_get_int("CACHE_TTL_EVIDENCE_SECONDS", 3600),
         request_timeout_seconds=_get_int("REQUEST_TIMEOUT_SECONDS", 20),
         max_evidence_documents=_get_int("MAX_EVIDENCE_DOCUMENTS", 8),

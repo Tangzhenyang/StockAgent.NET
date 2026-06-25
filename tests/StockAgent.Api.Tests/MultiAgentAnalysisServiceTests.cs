@@ -365,6 +365,50 @@ public sealed class MultiAgentAnalysisServiceTests
             "SynthesisReportAgent",
             "ReviewAgent"
         ]);
+        invocations.Should().OnlyContain(x => x.PromptTokens > 0 && x.CompletionTokens > 0);
+    }
+
+    /// <summary>
+    /// Industry data triggers the industry research agent and carries its trace into synthesis.
+    /// 行业数据会触发行业研究 Agent，并把轨迹带入综合阶段。
+    /// </summary>
+    [Fact]
+    public async Task SemanticKernelResearchAnalysisService_RunsIndustryAgentWhenIndustryDataExists()
+    {
+        await using var factory = TestApplicationFactory.Create();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
+        var client = new SequenceModelChatClient(
+            """{"score":70,"valuationView":"估值偏高","strengths":[],"risks":[],"followUpQuestions":[]}""",
+            """{"positiveFacts":[],"negativeFacts":[],"uncertainties":[],"citations":[]}""",
+            """{"industryView":"存储行业景气度待验证","opportunities":["价格修复"],"risks":["周期波动"],"newsHighlights":["存储新闻"],"followUpQuestions":["价格是否延续"]}""",
+            """{"overallScore":68,"riskLevel":"中等","valuationView":"估值偏高","summary":"摘要","keyAssumptions":[],"keyClaims":[],"markdown":"# 报告\n\n## 行业景气度\n存储行业待验证。"}""",
+            """{"approved":true,"issues":[],"revisionInstruction":""}""");
+        var service = new SemanticKernelResearchAnalysisService(
+            client,
+            new AgentContextBudgeter(new AgentContextBudgetOptions()),
+            db,
+            NullLogger<SemanticKernelResearchAnalysisService>.Instance);
+
+        var result = await service.AnalyzeAsync(
+            Guid.NewGuid(),
+            CreateSnapshot(),
+            [],
+            new ModelRuntimeSettings("OpenAICompatible", "https://example.test/v1", "test-model", "test-key"),
+            "zh-CN",
+            CancellationToken.None,
+            new IndustryResearchSnapshot(
+                "301308",
+                "江波龙",
+                "半导体存储",
+                ["半导体", "存储芯片"],
+                ["DRAM", "NAND Flash"],
+                "test",
+                DateTimeOffset.UtcNow,
+                [new IndustryNewsItem("存储新闻", "https://example.com", "test", DateTimeOffset.UtcNow, "存储行业消息")]));
+
+        result.AgentTraces.Should().Contain("IndustryResearchAgent:Succeeded");
+        result.ReportMarkdown.Should().Contain("行业景气度");
     }
 
     internal sealed class FakeModelChatClient(string json) : IModelChatClient

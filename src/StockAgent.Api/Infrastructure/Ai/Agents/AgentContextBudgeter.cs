@@ -43,6 +43,7 @@ public sealed class AgentContextBudgeter(AgentContextBudgetOptions options)
         MarketDataSnapshot snapshot,
         MarketFinancialAgentOutput market,
         EvidenceFilingAgentOutput evidence,
+        IndustryResearchAgentOutput? industry,
         string language)
     {
         var boundedMarket = market with
@@ -57,7 +58,17 @@ public sealed class AgentContextBudgeter(AgentContextBudgetOptions options)
             Citations = evidence.Citations.Take(options.MaxCitations).ToList()
         };
 
-        return new SynthesisReportAgentInput(snapshot, boundedMarket, boundedEvidence, language);
+        var boundedIndustry = industry is null
+            ? null
+            : industry with
+            {
+                Opportunities = industry.Opportunities.Take(6).ToList(),
+                Risks = industry.Risks.Take(6).ToList(),
+                NewsHighlights = industry.NewsHighlights.Take(8).ToList(),
+                FollowUpQuestions = industry.FollowUpQuestions.Take(6).ToList()
+            };
+
+        return new SynthesisReportAgentInput(snapshot, boundedMarket, boundedEvidence, boundedIndustry, language);
     }
 
     /// <summary>Builds a bounded review input from report key claims and citations only. 仅用报告关键结论和引用构建受限审核输入。</summary>

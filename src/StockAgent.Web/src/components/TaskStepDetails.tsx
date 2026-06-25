@@ -8,6 +8,7 @@ const stageLabels: Record<ResearchStep['stepName'], string> = {
   CollectStructuredData: '行情/财务采集',
   CollectPublicEvidence: '公告/证据采集',
   IngestAndIndexDocuments: '文档入库',
+  CollectIndustryInformation: '行业信息采集',
   AnalyzeWithSemanticKernel: '多 Agent 分析',
   ScoreAndRate: '评分评级',
   GenerateReport: '生成报告',
@@ -20,6 +21,42 @@ const statusLabels: Record<ResearchStep['status'], string> = {
   Succeeded: '完成',
   Failed: '失败',
   Skipped: '跳过',
+};
+
+const marketSnapshotLabels: Record<string, string> = {
+  ticker: '股票代码',
+  market: '市场',
+  companyName: '公司名称',
+  lastPrice: '最新价',
+  marketCap: '总市值',
+  peRatio: '市盈率 PE',
+  revenueGrowthPercent: '营收增长率',
+  netMarginPercent: '净利率',
+  quoteSource: '行情来源',
+  retrievedAt: '获取时间',
+  cacheTtlSeconds: '缓存秒数',
+  priceFreshness: '价格口径',
+};
+
+const genericLabels: Record<string, string> = {
+  overallScore: '综合评分',
+  riskLevel: '风险等级',
+  valuationView: '估值观点',
+  summary: '摘要',
+  tokenUsageNote: 'Token 说明',
+};
+
+const invocationLabels: Record<string, string> = {
+  stepName: 'Agent',
+  provider: '模型供应商',
+  modelName: '模型',
+  promptTokens: '输入 Token',
+  completionTokens: '输出 Token',
+  totalTokens: '总 Token',
+  durationMs: '耗时',
+  status: '状态',
+  errorMessage: '错误',
+  createdAt: '调用时间',
 };
 
 /**
@@ -123,7 +160,7 @@ function StepArtifacts({
 function ArtifactPayload({ artifact }: { artifact: ResearchStepArtifact }) {
   const payload = parsePayload(artifact.jsonPayload);
   if (artifact.artifactType === 'market-snapshot' && isRecord(payload)) {
-    return <KeyValueGrid value={payload} />;
+    return <KeyValueGrid value={payload} labels={marketSnapshotLabels} valueFormatter={formatMarketValue} />;
   }
 
   if (artifact.artifactType === 'source-documents' && Array.isArray(payload)) {
@@ -166,14 +203,45 @@ function ArtifactPayload({ artifact }: { artifact: ResearchStepArtifact }) {
     return (
       <div className="artifactStack">
         <KeyValueGrid
+          labels={genericLabels}
           value={{
             overallScore: payload.overallScore,
             riskLevel: payload.riskLevel,
             valuationView: payload.valuationView,
             summary: payload.summary,
+            tokenUsageNote: payload.tokenUsageNote,
           }}
         />
-        <NestedEvidenceList cards={toArray(payload.modelInvocations ?? payload.ModelInvocations)} title="模型调用" />
+        <ModelInvocationList invocations={toArray(payload.modelInvocations ?? payload.ModelInvocations)} />
+      </div>
+    );
+  }
+
+  if (artifact.artifactType === 'industry-profile' && isRecord(payload)) {
+    return (
+      <div className="artifactStack">
+        <KeyValueGrid
+          labels={{
+            ticker: '股票代码',
+            companyName: '公司名称',
+            industryName: '行业名称',
+            sectors: '相关赛道',
+            keywords: '关键词',
+            provider: '数据来源',
+            retrievedAt: '获取时间',
+          }}
+          value={{
+            ticker: payload.ticker,
+            companyName: payload.companyName,
+            industryName: payload.industryName,
+            sectors: payload.sectors,
+            keywords: payload.keywords,
+            provider: payload.provider,
+            retrievedAt: payload.retrievedAt,
+          }}
+          valueFormatter={formatIndustryValue}
+        />
+        <NestedEvidenceList cards={toArray(payload.news)} title="行业消息" />
       </div>
     );
   }
@@ -181,13 +249,21 @@ function ArtifactPayload({ artifact }: { artifact: ResearchStepArtifact }) {
   return <pre className="artifactJson">{artifact.jsonPayload}</pre>;
 }
 
-function KeyValueGrid({ value }: { value: Record<string, unknown> }) {
+function KeyValueGrid({
+  value,
+  labels = {},
+  valueFormatter = formatValue,
+}: {
+  value: Record<string, unknown>;
+  labels?: Record<string, string>;
+  valueFormatter?: (key: string, value: unknown) => string;
+}) {
   return (
     <dl className="artifactGrid">
       {Object.entries(value).map(([key, entry]) => (
         <div key={key}>
-          <dt>{key}</dt>
-          <dd>{formatValue(entry)}</dd>
+          <dt>{labels[key] ?? key}</dt>
+          <dd>{valueFormatter(key, entry)}</dd>
         </div>
       ))}
     </dl>
@@ -207,6 +283,26 @@ function NestedEvidenceList({ cards, title = '证据卡' }: { cards: unknown[]; 
           <li key={index}>{formatValue(card)}</li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function ModelInvocationList({ invocations }: { invocations: unknown[] }) {
+  if (invocations.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="modelInvocationList">
+      <span>模型调用</span>
+      {invocations.map((invocation, index) => (
+        <KeyValueGrid
+          key={index}
+          labels={invocationLabels}
+          value={toRecord(invocation)}
+          valueFormatter={formatInvocationValue}
+        />
+      ))}
     </div>
   );
 }
@@ -257,6 +353,82 @@ function formatValue(value: unknown): string {
   }
 
   return String(value);
+}
+
+function formatMarketValue(key: string, value: unknown): string {
+  if (key === 'market') {
+    if (value === 1 || value === '1' || value === 'AShare') {
+      return 'A 股';
+    }
+
+    if (value === 2 || value === '2' || value === 'HongKong') {
+      return '港股';
+    }
+  }
+
+  if (key === 'marketCap' && typeof value === 'number') {
+    return `${(value / 100000000).toFixed(2)} 亿元`;
+  }
+
+  if (['revenueGrowthPercent', 'netMarginPercent'].includes(key) && typeof value === 'number') {
+    return `${value.toFixed(2)}%`;
+  }
+
+  if (key === 'peRatio' && typeof value === 'number') {
+    return value.toFixed(2);
+  }
+
+  if (key === 'lastPrice' && typeof value === 'number') {
+    return value.toFixed(2);
+  }
+
+  if (key === 'retrievedAt' && typeof value === 'string') {
+    return new Date(value).toLocaleString('zh-CN');
+  }
+
+  if (key === 'priceFreshness') {
+    if (value === 'intraday-delayed') {
+      return '盘中延迟行情';
+    }
+
+    if (value === 'daily-close-fallback') {
+      return '日线收盘价兜底';
+    }
+  }
+
+  if (key === 'cacheTtlSeconds' && typeof value === 'number') {
+    return `${value} 秒`;
+  }
+
+  return formatValue(value);
+}
+
+function formatInvocationValue(key: string, value: unknown): string {
+  if (key === 'durationMs' && typeof value === 'number') {
+    return formatDuration(value);
+  }
+
+  if (key === 'createdAt' && typeof value === 'string') {
+    return new Date(value).toLocaleString('zh-CN');
+  }
+
+  if (['promptTokens', 'completionTokens', 'totalTokens'].includes(key)) {
+    return value === null || value === undefined || value === 0 ? '未返回/未估算' : String(value);
+  }
+
+  return formatValue(value);
+}
+
+function formatIndustryValue(key: string, value: unknown): string {
+  if (key === 'retrievedAt' && typeof value === 'string') {
+    return new Date(value).toLocaleString('zh-CN');
+  }
+
+  if (Array.isArray(value)) {
+    return value.join('、');
+  }
+
+  return formatValue(value);
 }
 
 function formatTime(value?: string) {

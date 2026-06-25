@@ -30,8 +30,16 @@ def _load_hong_kong_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSna
 
     quote_row = _first_successful_row(
         [
-            lambda: _find_first_row(ak.stock_hk_spot_em(), ["代码", "code"], normalized.ticker.removesuffix(".HK")),
-            lambda: _find_first_row(ak.stock_hk_spot(), ["代码", "code", "symbol"], normalized.ticker.removesuffix(".HK")),
+            lambda: _with_quote_meta(
+                _find_first_row(ak.stock_hk_spot_em(), ["代码", "code"], normalized.ticker.removesuffix(".HK")),
+                "akshare-hk-spot-em",
+                "intraday-delayed",
+            ),
+            lambda: _with_quote_meta(
+                _find_first_row(ak.stock_hk_spot(), ["代码", "code", "symbol"], normalized.ticker.removesuffix(".HK")),
+                "akshare-hk-spot",
+                "intraday-delayed",
+            ),
         ],
         provider="akshare-hk-quote",
     )
@@ -59,6 +67,9 @@ def _load_hong_kong_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSna
             ["营业总收入滚动环比增长(%)", "营业总收入同比增长(%)", "收入增长率"],
         ),
         netMarginPercent=_first_optional_number(financial_row, ["销售净利率(%)", "净利率", "NET_PROFIT_RATIO"]),
+        quoteSource=str(quote_row.get("_quote_source", "akshare-hk-quote")),
+        retrievedAt=datetime.now(UTC),
+        priceFreshness=str(quote_row.get("_price_freshness", "intraday-delayed")),
     )
 
 
@@ -67,8 +78,16 @@ def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnaps
 
     quote_row = _first_successful_row(
         [
-            lambda: _find_first_row(ak.stock_zh_a_spot_em(), ["代码", "code"], normalized.ticker),
-            lambda: _find_first_row(ak.stock_zh_a_spot(), ["代码", "code", "symbol"], normalized.ticker),
+            lambda: _with_quote_meta(
+                _find_first_row(ak.stock_zh_a_spot_em(), ["代码", "code"], normalized.ticker),
+                "akshare-a-spot-em",
+                "intraday-delayed",
+            ),
+            lambda: _with_quote_meta(
+                _find_first_row(ak.stock_zh_a_spot(), ["代码", "code", "symbol"], normalized.ticker),
+                "akshare-a-spot",
+                "intraday-delayed",
+            ),
             lambda: _load_a_share_daily_quote_row(ak, normalized),
             lambda: _load_a_share_tx_quote_row(ak, normalized),
         ],
@@ -98,6 +117,9 @@ def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnaps
             ],
         ),
         netMarginPercent=_first_optional_number(financial_row, ["XSJLL", "销售净利率", "净利率", "销售净利率(%)"]),
+        quoteSource=str(quote_row.get("_quote_source", "akshare-a-quote")),
+        retrievedAt=datetime.now(UTC),
+        priceFreshness=str(quote_row.get("_price_freshness", "intraday-delayed")),
     )
 
 
@@ -137,6 +159,8 @@ def _load_a_share_daily_quote_row(ak: Any, normalized: NormalizedTicker) -> dict
     if outstanding_share:
         row["总市值"] = close * outstanding_share
     row["最新价"] = close
+    row["_quote_source"] = "akshare-a-daily"
+    row["_price_freshness"] = "daily-close-fallback"
     return row
 
 
@@ -152,6 +176,19 @@ def _load_a_share_tx_quote_row(ak: Any, normalized: NormalizedTicker) -> dict[st
 
     row = frame.iloc[-1].to_dict()
     row["最新价"] = _to_float(row.get("close"), required_name="close")
+    row["_quote_source"] = "akshare-a-tx-daily"
+    row["_price_freshness"] = "daily-close-fallback"
+    return row
+
+
+def _with_quote_meta(row: dict[str, Any] | None, quote_source: str, price_freshness: str) -> dict[str, Any] | None:
+    """Attach quote source metadata to a provider row. 为行情行附加来源元数据。"""
+
+    if row is None:
+        return None
+
+    row["_quote_source"] = quote_source
+    row["_price_freshness"] = price_freshness
     return row
 
 

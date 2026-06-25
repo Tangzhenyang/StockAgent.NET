@@ -14,6 +14,10 @@ namespace StockAgent.Api.Infrastructure.DataSources;
 /// <param name="PeRatio">Latest provider-reported price-to-earnings ratio. 提供器报告的最新市盈率。</param>
 /// <param name="RevenueGrowthPercent">Recent revenue growth percentage. 最近的营收增长百分比。</param>
 /// <param name="NetMarginPercent">Recent net margin percentage. 最近的净利率百分比。</param>
+/// <param name="QuoteSource">Provider endpoint used for the latest price. 最新价格使用的数据源接口。</param>
+/// <param name="RetrievedAt">UTC timestamp when the snapshot was retrieved. 快照获取的 UTC 时间。</param>
+/// <param name="CacheTtlSeconds">Market snapshot cache TTL in seconds. 行情快照缓存秒数。</param>
+/// <param name="PriceFreshness">Price freshness category such as intraday-delayed or daily-close-fallback. 价格新鲜度类别，例如盘中延迟或日线兜底。</param>
 public sealed record MarketDataSnapshot(
     string Ticker,
     Market Market,
@@ -22,4 +26,8 @@ public sealed record MarketDataSnapshot(
     decimal MarketCap,
     decimal PeRatio,
     decimal RevenueGrowthPercent,
-    decimal NetMarginPercent);
+    decimal NetMarginPercent,
+    string? QuoteSource = null,
+    DateTimeOffset? RetrievedAt = null,
+    int? CacheTtlSeconds = null,
+    string? PriceFreshness = null);

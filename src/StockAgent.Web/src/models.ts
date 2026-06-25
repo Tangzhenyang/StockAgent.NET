@@ -43,6 +43,7 @@ export interface ResearchStep {
     | 'CollectStructuredData'
     | 'CollectPublicEvidence'
     | 'IngestAndIndexDocuments'
+    | 'CollectIndustryInformation'
     | 'AnalyzeWithSemanticKernel'
     | 'ScoreAndRate'
     | 'GenerateReport'

@@ -20,6 +20,7 @@ public sealed class ResearchOrchestrator(
     StockAgentDbContext db,
     IMarketDataProvider marketDataProvider,
     IWebResearchProvider webResearchProvider,
+    IIndustryResearchProvider industryResearchProvider,
     DocumentChunker documentChunker,
     ContextBudgetManager contextBudgetManager,
     IResearchAnalysisService analysisService,
@@ -99,6 +100,22 @@ public sealed class ResearchOrchestrator(
                 cancellationToken,
                 (result, step, token) => SaveIngestionArtifactAsync(task.Id, step, result, token));
 
+            await UpdateTaskStatusAsync(task, ResearchTaskStatus.CollectingData, ResearchStage.CollectIndustryInformation, 65, cancellationToken);
+            var industry = await RunStepAsync(
+                task,
+                ResearchStage.CollectIndustryInformation,
+                "请求行业画像和近期行业新闻",
+                token => industryResearchProvider.GetIndustryAsync(task.Ticker, snapshot.CompanyName, dataSourceSettings, token),
+                result => $"行业信息完成：{result.IndustryName}，{result.News.Count} 条行业消息",
+                cancellationToken,
+                (result, step, token) => SaveStepArtifactAsync(
+                    step,
+                    "industry-profile",
+                    "行业画像与近期消息",
+                    $"{result.IndustryName}，{result.News.Count} 条行业消息",
+                    result,
+                    token));
+
             await UpdateTaskStatusAsync(task, ResearchTaskStatus.Analyzing, ResearchStage.AnalyzeWithSemanticKernel, 75, cancellationToken);
             var researchSettings = await userSettingsService.GetResearchSettingsAsync(task.UserId, cancellationToken);
             var modelSettings = await userSettingsService.GetModelRuntimeSettingsAsync(task.UserId, cancellationToken);
@@ -113,7 +130,8 @@ public sealed class ResearchOrchestrator(
                     selectedEvidence,
                     modelSettings,
                     task.Language,
-                    token),
+                    token,
+                    industry),
                 result => $"多 Agent 分析完成：{string.Join("，", result.AgentTraces ?? [])}",
                 cancellationToken,
                 (result, step, token) => SaveAnalysisArtifactAsync(task.Id, step, result, token));
@@ -371,6 +389,9 @@ public sealed class ResearchOrchestrator(
                 x.StepName,
                 x.Provider,
                 x.ModelName,
+                x.PromptTokens,
+                x.CompletionTokens,
+                TotalTokens = (x.PromptTokens ?? 0) + (x.CompletionTokens ?? 0),
                 x.DurationMs,
                 x.Status,
                 x.ErrorMessage,
@@ -385,6 +406,7 @@ public sealed class ResearchOrchestrator(
             analysis.Summary,
             analysis.KeyAssumptions,
             analysis.AgentTraces,
+            TokenUsageNote = "当前 token 为基于输入/输出文本长度的估算值；如果后续模型适配层透出 provider usage，可替换为精确值。",
             ModelInvocations = invocations
         };
 

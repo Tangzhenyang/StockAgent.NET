@@ -569,6 +569,18 @@ a {
   margin: 4px 0 0;
 }
 
+.modelInvocationList {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.modelInvocationList > span {
+  color: #4f5d6b;
+  font-size: 13px;
+  font-weight: 650;
+}
+
 .artifactJson {
   max-width: 100%;
   overflow: auto;

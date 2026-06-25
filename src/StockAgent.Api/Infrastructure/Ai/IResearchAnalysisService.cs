@@ -17,6 +17,7 @@ public interface IResearchAnalysisService
     /// <param name="modelSettings">Runtime model settings with decrypted API key. 包含解密 API Key 的运行时模型设置。</param>
     /// <param name="language">Report and analysis language. 报告和分析语言。</param>
     /// <param name="cancellationToken">Cancellation token for request shutdown. 用于请求中止的取消令牌。</param>
+    /// <param name="industryData">Optional industry profile and recent sector news. 可选行业画像和近期赛道消息。</param>
     /// <returns>Structured analysis result for scoring and report generation. 用于评分和报告生成的结构化分析结果。</returns>
     Task<AiAnalysisResult> AnalyzeAsync(
         Guid researchTaskId,
@@ -24,5 +25,6 @@ public interface IResearchAnalysisService
         IReadOnlyList<EvidenceCard> evidenceCards,
         ModelRuntimeSettings modelSettings,
         string language,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        IndustryResearchSnapshot? industryData = null);
 }

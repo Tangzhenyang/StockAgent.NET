@@ -14,6 +14,8 @@ public enum ResearchStage
     CollectPublicEvidence = 3,
     /// <summary>Parse, chunk, and index collected documents. 解析、分块并索引已收集文档。</summary>
     IngestAndIndexDocuments = 4,
+    /// <summary>Collect industry profile and recent sector news. 收集行业画像和近期行业新闻。</summary>
+    CollectIndustryInformation = 9,
     /// <summary>Run Semantic Kernel-backed analysis over bounded evidence packs. 对受限证据包运行基于 Semantic Kernel 的分析。</summary>
     AnalyzeWithSemanticKernel = 5,
     /// <summary>Create structured scoring and rating output. 创建结构化评分和评级输出。</summary>

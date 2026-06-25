@@ -104,6 +104,47 @@ def test_a_share_snapshot_uses_single_stock_daily_when_realtime_lists_fail(monke
     assert snapshot.net_margin_percent == 52.2245
 
 
+def test_a_share_snapshot_prefers_realtime_spot_over_daily_close(monkeypatch):
+    pd = __import__("pandas")
+
+    class FakeAk:
+        @staticmethod
+        def stock_zh_a_spot_em():
+            return pd.DataFrame(
+                [
+                    {
+                        "代码": "301308",
+                        "名称": "江波龙",
+                        "最新价": 700.25,
+                        "总市值": 190_000_000_000,
+                        "市盈率-动态": 68.2,
+                    }
+                ]
+            )
+
+        @staticmethod
+        def stock_zh_a_spot():
+            raise AssertionError("daily fallback should not be reached when realtime spot is available")
+
+        @staticmethod
+        def stock_zh_a_daily(symbol, start_date, end_date, adjust):
+            raise AssertionError("daily fallback should not be reached when realtime spot is available")
+
+        @staticmethod
+        def stock_financial_analysis_indicator_em(symbol, indicator):
+            return pd.DataFrame([{"EPSJB": 5.0, "TOTALOPERATEREVETZ": 132.7, "XSJLL": 40.1}])
+
+        @staticmethod
+        def stock_profile_cninfo(symbol):
+            return pd.DataFrame([{"A股简称": "江波龙"}])
+
+    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
+
+    assert snapshot.last_price == 700.25
+    assert snapshot.quote_source == "akshare-a-spot-em"
+    assert snapshot.price_freshness == "intraday-delayed"
+
+
 def test_a_share_financial_loader_uses_latest_sina_row():
     pd = __import__("pandas")
 

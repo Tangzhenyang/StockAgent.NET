@@ -26,6 +26,7 @@ public sealed class MultiAgentResearchPipelineTests
         await using var factory = TestApplicationFactory.CreateWithModelClient(new SequenceModelChatClient(
             """{"score":70,"valuationView":"估值偏高","strengths":["净利率高"],"risks":["PE 偏高"],"followUpQuestions":[]}""",
             """{"positiveFacts":["年报已披露"],"negativeFacts":[],"uncertainties":[],"citations":[]}""",
+            """{"industryView":"白酒行业景气度待验证","opportunities":["品牌优势"],"risks":["需求波动"],"newsHighlights":["行业新闻"],"followUpQuestions":[]}""",
             """{"overallScore":68,"riskLevel":"中等","valuationView":"估值偏高","summary":"摘要","keyAssumptions":["增长延续"],"keyClaims":[],"markdown":"# 多 Agent 研究报告"}""",
             """{"approved":true,"issues":[],"revisionInstruction":""}"""));
 
@@ -71,6 +72,8 @@ public sealed class MultiAgentResearchPipelineTests
             steps.Select(x => x.InputSummary).Should().Contain("请求公告/证据数据源");
             steps.Select(x => x.OutputSummary).Should().Contain(x => x != null && x.Contains("获取到 2 条证据文档"));
             steps.Select(x => x.OutputSummary).Should().Contain(x => x != null && x.Contains("生成 2 张证据卡片"));
+            steps.Select(x => x.InputSummary).Should().Contain("请求行业画像和近期行业新闻");
+            steps.Select(x => x.OutputSummary).Should().Contain(x => x != null && x.Contains("行业信息完成"));
             steps.Select(x => x.InputSummary).Should().Contain("运行多 Agent 分析链路");
             steps.Select(x => x.OutputSummary).Should().Contain(x => x != null && x.Contains("MarketFinancialAgent"));
         }

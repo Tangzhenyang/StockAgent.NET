@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using StockAgent.Api.Domain;
 using StockAgent.Api.Features.UserSettings;
 using StockAgent.Api.Infrastructure.Ai.Agents;
@@ -18,6 +19,8 @@ public sealed class SemanticKernelResearchAnalysisService(
     StockAgentDbContext db,
     ILogger<SemanticKernelResearchAnalysisService> logger) : IResearchAnalysisService
 {
+    private static readonly JsonSerializerOptions TokenEstimateJsonOptions = new(JsonSerializerDefaults.Web);
+
     /// <inheritdoc />
     public async Task<AiAnalysisResult> AnalyzeAsync(
         Guid researchTaskId,
@@ -25,7 +28,8 @@ public sealed class SemanticKernelResearchAnalysisService(
         IReadOnlyList<EvidenceCard> evidenceCards,
         ModelRuntimeSettings modelSettings,
         string language,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IndustryResearchSnapshot? industryData = null)
     {
         logger.LogInformation(
             "Starting fixed-flow multi-agent analysis for {Ticker} with {EvidenceCount} evidence cards.",
@@ -40,15 +44,27 @@ public sealed class SemanticKernelResearchAnalysisService(
         var evidenceTask = RunMeasuredAsync(evidenceAgent, evidenceInput, modelSettings, cancellationToken);
         await Task.WhenAll(marketTask, evidenceTask);
         var evidenceOutput = SanitizeEvidenceOutput(evidenceTask.Result.Output, evidenceInput);
+        var industryRun = industryData is null
+            ? null
+            : await RunMeasuredAsync(
+                new IndustryResearchAgent(chatClient, modelSettings),
+                new IndustryResearchAgentInput(marketData, industryData, language),
+                modelSettings,
+                cancellationToken);
         AgentOutputValidators.ValidateMarket(marketTask.Result.Output);
         AgentOutputValidators.ValidateEvidence(evidenceOutput, evidenceInput);
         await SaveInvocationsAsync(researchTaskId, [marketTask.Result.Invocation, evidenceTask.Result.Invocation], cancellationToken);
+        if (industryRun is not null)
+        {
+            await SaveInvocationsAsync(researchTaskId, [industryRun.Invocation], cancellationToken);
+        }
 
         var synthesisAgent = new SynthesisReportAgent(chatClient, modelSettings);
         var synthesisInput = contextBudgeter.BuildSynthesisInput(
             marketData,
             marketTask.Result.Output,
             evidenceOutput,
+            industryRun?.Output,
             language);
         var synthesisRun = await RunMeasuredAsync(synthesisAgent, synthesisInput, modelSettings, cancellationToken);
         var synthesisOutput = SanitizeSynthesisOutput(synthesisRun.Output, evidenceOutput);
@@ -78,10 +94,11 @@ public sealed class SemanticKernelResearchAnalysisService(
                 ],
                 limitedMarkdown,
                 [
-                    "MarketFinancialAgent:Succeeded",
-                    "EvidenceFilingAgent:Succeeded",
-                    "SynthesisReportAgent:Succeeded",
-                    "ReviewAgent:LimitedReport"
+                "MarketFinancialAgent:Succeeded",
+                "EvidenceFilingAgent:Succeeded",
+                ..(industryRun is null ? [] : new[] { "IndustryResearchAgent:Succeeded" }),
+                "SynthesisReportAgent:Succeeded",
+                "ReviewAgent:LimitedReport"
                 ]);
         }
 
@@ -95,6 +112,7 @@ public sealed class SemanticKernelResearchAnalysisService(
             [
                 "MarketFinancialAgent:Succeeded",
                 "EvidenceFilingAgent:Succeeded",
+                ..(industryRun is null ? [] : new[] { "IndustryResearchAgent:Succeeded" }),
                 "SynthesisReportAgent:Succeeded",
                 "ReviewAgent:Approved"
             ]);
@@ -185,6 +203,8 @@ public sealed class SemanticKernelResearchAnalysisService(
         var started = Stopwatch.GetTimestamp();
         var output = await agent.RunAsync(input, cancellationToken);
         var durationMs = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        var promptTokens = EstimateTokens(JsonSerializer.Serialize(input, TokenEstimateJsonOptions));
+        var completionTokens = EstimateTokens(JsonSerializer.Serialize(output, TokenEstimateJsonOptions));
         return new AgentRunResult<TOutput>(
             output,
             new ModelInvocation
@@ -192,6 +212,8 @@ public sealed class SemanticKernelResearchAnalysisService(
                 StepName = agent.Name,
                 Provider = modelSettings.Provider,
                 ModelName = modelSettings.Model,
+                PromptTokens = promptTokens,
+                CompletionTokens = completionTokens,
                 DurationMs = durationMs,
                 Status = "Succeeded"
             });
@@ -209,6 +231,18 @@ public sealed class SemanticKernelResearchAnalysisService(
 
         db.ModelInvocations.AddRange(invocations);
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static int EstimateTokens(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return 0;
+        }
+
+        var asciiCharacters = text.Count(x => x <= 127);
+        var nonAsciiCharacters = text.Length - asciiCharacters;
+        return Math.Max(1, (int)Math.Ceiling((asciiCharacters / 4.0) + (nonAsciiCharacters / 1.8)));
     }
 
     private sealed record AgentRunResult<TOutput>(TOutput Output, ModelInvocation Invocation);

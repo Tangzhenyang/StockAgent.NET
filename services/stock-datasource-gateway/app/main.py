@@ -2,9 +2,9 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 
 from app.core.security import require_bearer_token
-from app.models.contracts import EvidenceDocumentResponse, HealthResponse, MarketSnapshotResponse
+from app.models.contracts import EvidenceDocumentResponse, HealthResponse, IndustryProfileResponse, MarketSnapshotResponse
 from app.providers.errors import DataSourceProviderError
-from app.services import evidence_service, market_service
+from app.services import evidence_service, industry_service, market_service
 
 app = FastAPI(title="Stock DataSource Gateway", version="0.1.0")
 
@@ -50,3 +50,14 @@ def web_search(ticker: str, companyName: str = "") -> list[EvidenceDocumentRespo
     """Return evidence documents for a ticker and optional company name. 返回指定股票代码和公司名的证据文档。"""
 
     return evidence_service.search_evidence_documents(ticker, companyName)
+
+
+@app.get(
+    "/api/industry/profile",
+    response_model=IndustryProfileResponse,
+    dependencies=[Depends(require_bearer_token)],
+)
+def industry_profile(ticker: str) -> IndustryProfileResponse:
+    """Return industry profile and recent industry news for a ticker. 返回股票行业画像和近期行业新闻。"""
+
+    return industry_service.get_industry_profile(ticker)

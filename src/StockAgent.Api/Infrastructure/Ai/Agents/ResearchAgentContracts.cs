@@ -49,11 +49,26 @@ public sealed record EvidenceFilingAgentOutput(
     IReadOnlyList<string> Uncertainties,
     IReadOnlyList<EvidenceCitation> Citations);
 
+/// <summary>Input for industry and sector analysis. 行业与赛道分析输入。</summary>
+public sealed record IndustryResearchAgentInput(
+    MarketDataSnapshot Snapshot,
+    IndustryResearchSnapshot Industry,
+    string Language);
+
+/// <summary>Structured output from industry and sector analysis. 行业与赛道分析结构化输出。</summary>
+public sealed record IndustryResearchAgentOutput(
+    string IndustryView,
+    IReadOnlyList<string> Opportunities,
+    IReadOnlyList<string> Risks,
+    IReadOnlyList<string> NewsHighlights,
+    IReadOnlyList<string> FollowUpQuestions);
+
 /// <summary>Input for report synthesis. 报告综合输入。</summary>
 public sealed record SynthesisReportAgentInput(
     MarketDataSnapshot Snapshot,
     MarketFinancialAgentOutput MarketAnalysis,
     EvidenceFilingAgentOutput EvidenceAnalysis,
+    IndustryResearchAgentOutput? IndustryAnalysis,
     string Language);
 
 /// <summary>Structured final report draft from synthesis. 综合 Agent 生成的结构化报告草稿。</summary>

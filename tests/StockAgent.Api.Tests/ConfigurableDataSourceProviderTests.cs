@@ -36,7 +36,11 @@ public sealed class ConfigurableDataSourceProviderTests
                   "marketCap": 3000000000000,
                   "peRatio": 18.4,
                   "revenueGrowthPercent": 8.2,
-                  "netMarginPercent": 24.5
+                  "netMarginPercent": 24.5,
+                  "quoteSource": "akshare-hk-spot-em",
+                  "retrievedAt": "2026-06-25T03:30:00+00:00",
+                  "cacheTtlSeconds": 60,
+                  "priceFreshness": "intraday-delayed"
                 }
                 """;
             return new HttpResponseMessage(HttpStatusCode.OK)
@@ -55,6 +59,9 @@ public sealed class ConfigurableDataSourceProviderTests
         snapshot.CompanyName.Should().Be("腾讯控股");
         snapshot.Market.Should().Be(Market.HongKong);
         snapshot.PeRatio.Should().Be(18.4m);
+        snapshot.QuoteSource.Should().Be("akshare-hk-spot-em");
+        snapshot.CacheTtlSeconds.Should().Be(60);
+        snapshot.PriceFreshness.Should().Be("intraday-delayed");
     }
 
     /// <summary>
@@ -173,6 +180,56 @@ public sealed class ConfigurableDataSourceProviderTests
         var documents = await provider.SearchAsync("00700.HK", "腾讯控股", settings, CancellationToken.None);
 
         documents.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Custom HTTP industry providers reuse the configured evidence datasource gateway.
+    /// 自定义 HTTP 行业数据源复用已配置的证据数据源网关。
+    /// </summary>
+    [Fact]
+    public async Task ConfiguredIndustryResearchProvider_UsesCustomHttpIndustryProfile()
+    {
+        var httpClient = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            request.RequestUri!.AbsolutePath.Should().Be("/api/industry/profile");
+            request.RequestUri.Query.Should().Contain("ticker=301308");
+            request.Headers.Authorization!.Scheme.Should().Be("Bearer");
+            request.Headers.Authorization.Parameter.Should().Be("web-key");
+            var json = """
+                {
+                  "ticker": "301308",
+                  "companyName": "江波龙",
+                  "industryName": "半导体存储",
+                  "sectors": ["半导体", "存储芯片"],
+                  "keywords": ["DRAM", "NAND Flash"],
+                  "provider": "akshare-news-with-local-industry-map",
+                  "retrievedAt": "2026-06-25T03:30:00+00:00",
+                  "news": [
+                    {
+                      "title": "存储价格跟踪",
+                      "url": "https://example.com/storage",
+                      "source": "example",
+                      "publishedAt": "2026-06-25T00:00:00+00:00",
+                      "summary": "存储行业消息"
+                    }
+                  ]
+                }
+                """;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+        }));
+        var provider = new ConfiguredIndustryResearchProvider(
+            httpClient,
+            new FakeIndustryResearchProvider(),
+            NullLogger<ConfiguredIndustryResearchProvider>.Instance);
+        var settings = CreateRuntimeSettings(webBaseUrl: "http://datasource:8000", webApiKey: "web-key");
+
+        var snapshot = await provider.GetIndustryAsync("301308", "江波龙", settings, CancellationToken.None);
+
+        snapshot.IndustryName.Should().Be("半导体存储");
+        snapshot.News.Should().ContainSingle();
     }
 
     private static DataSourceRuntimeSettings CreateRuntimeSettings(

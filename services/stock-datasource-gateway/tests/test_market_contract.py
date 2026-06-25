@@ -340,7 +340,7 @@ def test_a_share_snapshot_allows_missing_market_cap_when_price_and_pe_exist(monk
     assert snapshot.quote_source == "akshare-a-spot-em"
 
 
-def test_eastmoney_single_stock_quote_requires_complete_core_fields(monkeypatch):
+def test_eastmoney_single_stock_quote_accepts_price_only_to_avoid_slow_list_fallback(monkeypatch):
     class FakeResponse:
         @staticmethod
         def raise_for_status():
@@ -362,7 +362,63 @@ def test_eastmoney_single_stock_quote_requires_complete_core_fields(monkeypatch)
 
     row = akshare_market._load_a_share_eastmoney_quote_row(normalize_ticker("301308"))
 
-    assert row is None
+    assert row["最新价"] == 659.01
+    assert row["总市值"] == 0
+    assert row["市盈率-动态"] == 0
+    assert row["_quote_source"] == "eastmoney-push2-stock-get"
+
+
+def test_a_share_snapshot_allows_missing_pe_when_price_exists(monkeypatch):
+    pd = __import__("pandas")
+
+    def fake_price_only_eastmoney(normalized):
+        return {
+            "代码": normalized.ticker,
+            "名称": "江波龙",
+            "最新价": 659.01,
+            "总市值": 0,
+            "市盈率-动态": 0,
+            "_quote_source": "eastmoney-push2-stock-get",
+            "_price_freshness": "intraday-delayed",
+        }
+
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_quote_row", fake_price_only_eastmoney, raising=False)
+
+    class FakeAk:
+        @staticmethod
+        def stock_zh_a_spot_em():
+            raise AssertionError("slow realtime list should not be reached")
+
+        @staticmethod
+        def stock_zh_a_spot():
+            raise AssertionError("secondary realtime list should not be reached")
+
+        @staticmethod
+        def stock_zh_a_daily(symbol, start_date, end_date, adjust):
+            raise AssertionError("daily fallback should not be reached")
+
+        @staticmethod
+        def stock_financial_analysis_indicator_em(symbol, indicator):
+            return pd.DataFrame([{"TOTALOPERATEREVETZ": 132.7, "XSJLL": 40.1}])
+
+        @staticmethod
+        def stock_financial_analysis_indicator(symbol, start_year):
+            return pd.DataFrame([])
+
+        @staticmethod
+        def stock_individual_info_em(symbol):
+            return pd.DataFrame([{"item": "股票简称", "value": "江波龙"}])
+
+        @staticmethod
+        def stock_profile_cninfo(symbol):
+            return pd.DataFrame([{"A股简称": "江波龙"}])
+
+    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
+
+    assert snapshot.last_price == 659.01
+    assert snapshot.market_cap == 0
+    assert snapshot.pe_ratio == 0
+    assert snapshot.quote_source == "eastmoney-push2-stock-get"
 
 
 def test_find_first_row_matches_prefixed_and_suffixed_a_share_codes():

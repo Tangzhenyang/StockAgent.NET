@@ -235,8 +235,6 @@ def _load_a_share_eastmoney_quote_row(normalized: NormalizedTicker) -> dict[str,
         return None
     market_cap = _eastmoney_plain_number(data.get("f116"))
     pe_ratio = _eastmoney_scaled_number(data.get("f162"))
-    if market_cap == 0 or pe_ratio == 0:
-        return None
 
     return {
         "代码": str(data.get("f57") or normalized.ticker),
@@ -336,11 +334,7 @@ def _a_share_pe_ratio(
     if eps:
         return last_price / eps
 
-    raise DataSourceProviderError(
-        "Required market field peRatio was not available from real providers.",
-        provider="akshare-market",
-        retryable=True,
-    )
+    return 0.0
 
 
 def _first_successful_row(loaders: list[Any], provider: str) -> dict[str, Any]:

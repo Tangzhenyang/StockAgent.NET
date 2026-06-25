@@ -288,11 +288,7 @@ def _a_share_market_cap(
     if shares:
         return last_price * shares
 
-    raise DataSourceProviderError(
-        "Required market field marketCap was not available from real providers.",
-        provider="akshare-market",
-        retryable=True,
-    )
+    return 0.0
 
 
 def _a_share_total_shares(*rows: dict[str, Any] | None) -> float:

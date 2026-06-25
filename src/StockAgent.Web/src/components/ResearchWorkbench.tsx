@@ -119,16 +119,18 @@ export function ResearchWorkbench() {
         <section className="taskList" aria-label="研究任务">
           {tasks.map((task) => {
             const canDelete = canDeleteTask(task);
+            const statusClassName = getTaskStatusClassName(task.status);
             return (
               <div key={task.id} className={task.id === selectedTask?.id ? 'taskItem active' : 'taskItem'}>
                 <button type="button" className="taskSelectButton" onClick={() => setSelectedTaskId(task.id)}>
                   <span>{task.ticker}</span>
-                  <small>{task.status}</small>
+                  <small className={statusClassName}>{task.status}</small>
                 </button>
                 <button
                   type="button"
                   className="taskDeleteButton"
                   disabled={!canDelete || deleteMutation.isPending}
+                  aria-label={`删除 ${task.ticker} 的研究记录`}
                   title={canDelete ? '删除记录' : '任务仍在运行，超过 10 分钟未更新后可删除'}
                   onClick={() => {
                     if (window.confirm(`确认删除 ${task.ticker} 的研究记录？`)) {
@@ -136,7 +138,7 @@ export function ResearchWorkbench() {
                     }
                   }}
                 >
-                  删除
+                  ×
                 </button>
               </div>
             );
@@ -178,4 +180,16 @@ function canDeleteTask(task: ResearchTask) {
   }
 
   return Date.now() - new Date(task.updatedAt).getTime() >= staleTaskDeleteMs;
+}
+
+function getTaskStatusClassName(status: ResearchTask['status']) {
+  if (status === 'Ready') {
+    return 'taskStatus taskStatusReady';
+  }
+
+  if (status === 'Failed') {
+    return 'taskStatus taskStatusFailed';
+  }
+
+  return 'taskStatus taskStatusActive';
 }

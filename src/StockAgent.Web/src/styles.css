@@ -239,13 +239,24 @@ a {
 }
 
 .taskDeleteButton {
-  min-height: 30px;
-  border: 1px solid #d4dbe6;
-  border-radius: 6px;
-  padding: 4px 8px;
-  background: #ffffff;
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #f0b8b2;
+  border-radius: 999px;
+  padding: 0;
+  background: #fff5f3;
   color: #b42318;
-  font-size: 13px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.taskDeleteButton:hover:not(:disabled) {
+  border-color: #d92d20;
+  background: #fee4e2;
+  color: #912018;
 }
 
 .taskItem.active,
@@ -257,6 +268,31 @@ a {
 .taskItem small,
 .historyItem small {
   color: #5d6b7a;
+}
+
+.taskStatus {
+  flex: 0 0 auto;
+  min-width: 78px;
+  border-radius: 999px;
+  padding: 3px 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.taskItem .taskStatusReady {
+  background: #e8f6ef;
+  color: #1f7a4d;
+}
+
+.taskItem .taskStatusFailed {
+  background: #fee4e2;
+  color: #b42318;
+}
+
+.taskItem .taskStatusActive {
+  background: #e9f3fb;
+  color: #1769aa;
 }
 
 .content {

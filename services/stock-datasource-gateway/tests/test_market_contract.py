@@ -296,6 +296,50 @@ def test_a_share_snapshot_derives_market_cap_from_total_shares_when_quote_lacks_
     assert snapshot.quote_source == "akshare-a-spot-em"
 
 
+def test_a_share_snapshot_allows_missing_market_cap_when_price_and_pe_exist(monkeypatch):
+    pd = __import__("pandas")
+
+    class FakeAk:
+        @staticmethod
+        def stock_zh_a_spot_em():
+            return pd.DataFrame(
+                [
+                    {
+                        "代码": "301308",
+                        "名称": "江波龙",
+                        "最新价": 659.01,
+                        "市盈率-动态": 67.3,
+                    }
+                ]
+            )
+
+        @staticmethod
+        def stock_zh_a_spot():
+            raise AssertionError("secondary spot should not be reached")
+
+        @staticmethod
+        def stock_zh_a_daily(symbol, start_date, end_date, adjust):
+            raise AssertionError("daily fallback should not be reached")
+
+        @staticmethod
+        def stock_financial_analysis_indicator_em(symbol, indicator):
+            return pd.DataFrame([{"EPSJB": 5.0, "TOTALOPERATEREVETZ": 132.7, "XSJLL": 40.1}])
+
+        @staticmethod
+        def stock_individual_info_em(symbol):
+            return pd.DataFrame([{"item": "股票简称", "value": "江波龙"}])
+
+        @staticmethod
+        def stock_profile_cninfo(symbol):
+            return pd.DataFrame([{"A股简称": "江波龙"}])
+
+    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
+
+    assert snapshot.market_cap == 0
+    assert snapshot.pe_ratio == 67.3
+    assert snapshot.quote_source == "akshare-a-spot-em"
+
+
 def test_eastmoney_single_stock_quote_requires_complete_core_fields(monkeypatch):
     class FakeResponse:
         @staticmethod

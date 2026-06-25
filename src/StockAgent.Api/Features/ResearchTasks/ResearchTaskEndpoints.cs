@@ -14,6 +14,7 @@ namespace StockAgent.Api.Features.ResearchTasks;
 public static class ResearchTaskEndpoints
 {
     private static readonly TimeSpan LongRunningStepThreshold = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan StaleActiveTaskThreshold = TimeSpan.FromMinutes(10);
 
     /// <summary>Maps research task endpoints. 映射研究任务端点。</summary>
     public static IEndpointRouteBuilder MapResearchTaskEndpoints(this IEndpointRouteBuilder app)
@@ -160,9 +161,9 @@ public static class ResearchTaskEndpoints
                 return Results.NotFound();
             }
 
-            if (!CanDelete(task.Status))
+            if (!CanDelete(task, DateTimeOffset.UtcNow))
             {
-                return Results.Conflict(new { error = "Only failed, completed, ready, or cancelled tasks can be deleted." });
+                return Results.Conflict(new { error = "Only terminal tasks or active tasks stale for more than 10 minutes can be deleted." });
             }
 
             var sources = await db.DocumentSources
@@ -204,12 +205,17 @@ public static class ResearchTaskEndpoints
         return app;
     }
 
-    private static bool CanDelete(ResearchTaskStatus status)
+    private static bool CanDelete(ResearchTask task, DateTimeOffset now)
     {
-        return status is ResearchTaskStatus.Failed
+        if (task.Status is ResearchTaskStatus.Failed
             or ResearchTaskStatus.Ready
             or ResearchTaskStatus.Completed
-            or ResearchTaskStatus.Cancelled;
+            or ResearchTaskStatus.Cancelled)
+        {
+            return true;
+        }
+
+        return now - task.UpdatedAt >= StaleActiveTaskThreshold;
     }
 
     private static ResearchTaskResponse ToResponse(ResearchTask task)

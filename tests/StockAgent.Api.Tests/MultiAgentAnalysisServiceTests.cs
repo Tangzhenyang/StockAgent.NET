@@ -169,6 +169,46 @@ public sealed class MultiAgentAnalysisServiceTests
     }
 
     /// <summary>
+    /// Evidence agent output with loose string citations is tolerated and sanitized before synthesis.
+    /// 证据 Agent 返回宽松字符串引用时会被容忍，并在综合前清洗。
+    /// </summary>
+    [Fact]
+    public async Task SemanticKernelResearchAnalysisService_SanitizesLooseEvidenceCitations()
+    {
+        await using var factory = TestApplicationFactory.Create();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
+        var client = new SequenceModelChatClient(
+            """
+            {"score":70,"valuationView":"估值偏高","strengths":["净利率高"],"risks":["PE 偏高"],"followUpQuestions":[]}
+            """,
+            """
+            {"positiveFacts":["年度报告已披露"],"negativeFacts":[],"uncertainties":[],"citations":["年报显示收入增长"]}
+            """,
+            """
+            {"overallScore":68,"riskLevel":"中等","valuationView":"估值偏高","summary":"摘要","keyAssumptions":[],"keyClaims":[],"markdown":"# 报告"}
+            """,
+            """
+            {"approved":true,"issues":[],"revisionInstruction":""}
+            """);
+        var service = new SemanticKernelResearchAnalysisService(
+            client,
+            new AgentContextBudgeter(new AgentContextBudgetOptions()),
+            db,
+            NullLogger<SemanticKernelResearchAnalysisService>.Instance);
+
+        var result = await service.AnalyzeAsync(
+            Guid.NewGuid(),
+            CreateSnapshot(),
+            [],
+            new ModelRuntimeSettings("OpenAICompatible", "https://example.test/v1", "test-model", "test-key"),
+            "zh-CN",
+            CancellationToken.None);
+
+        result.ReportMarkdown.Should().Contain("# 报告");
+    }
+
+    /// <summary>
     /// Fixed-flow analysis writes one model invocation record per agent.
     /// 固定流程分析会为每个 Agent 写入一条模型调用记录。
     /// </summary>

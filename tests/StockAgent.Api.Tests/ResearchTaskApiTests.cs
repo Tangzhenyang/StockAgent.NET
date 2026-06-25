@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using StockAgent.Api.Domain;
 using StockAgent.Api.Features.ResearchTasks;
@@ -142,7 +143,13 @@ public sealed class ResearchTaskApiTests
         });
         await TestApplicationFactory.RegisterAndLoginAsync(client, "delete-failed-task-user");
 
-        var task = await CreateTaskAsync(client, "700");
+        var task = await SeedTaskAsync(
+            factory.Services,
+            "delete-failed-task-user",
+            "00700.HK",
+            Market.HongKong,
+            ResearchTaskStatus.Failed,
+            DateTimeOffset.UtcNow);
         await SeedTaskChildrenAsync(factory.Services, task.Id, ResearchTaskStatus.Failed);
 
         var response = await client.DeleteAsync($"/api/research-tasks/{task.Id}");
@@ -176,12 +183,46 @@ public sealed class ResearchTaskApiTests
         });
         await TestApplicationFactory.RegisterAndLoginAsync(client, "delete-active-task-user");
 
-        var task = await CreateTaskAsync(client, "700");
-        await SetTaskStatusAsync(factory.Services, task.Id, ResearchTaskStatus.CollectingData);
+        var task = await SeedTaskAsync(
+            factory.Services,
+            "delete-active-task-user",
+            "00700.HK",
+            Market.HongKong,
+            ResearchTaskStatus.CollectingData,
+            DateTimeOffset.UtcNow);
 
         var response = await client.DeleteAsync($"/api/research-tasks/{task.Id}");
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    /// <summary>
+    /// Deleting a stale active task is allowed so old stuck tasks can be cleaned up.
+    /// 允许删除过期活动任务，以便清理旧的卡死任务。
+    /// </summary>
+    [Fact]
+    public async Task DeleteResearchTask_AllowsStaleActiveTask()
+    {
+        await using var factory = TestApplicationFactory.Create();
+
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true
+        });
+        await TestApplicationFactory.RegisterAndLoginAsync(client, "delete-stale-task-user");
+
+        var task = await SeedTaskAsync(
+            factory.Services,
+            "delete-stale-task-user",
+            "00700.HK",
+            Market.HongKong,
+            ResearchTaskStatus.CollectingData,
+            DateTimeOffset.UtcNow.AddMinutes(-30));
+
+        var response = await client.DeleteAsync($"/api/research-tasks/{task.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
 
     private static async Task<ResearchTaskResponse> CreateTaskAsync(HttpClient client, string ticker)
@@ -194,17 +235,28 @@ public sealed class ResearchTaskApiTests
         return JsonSerializer.Deserialize<ResearchTaskResponse>(json, CreateJsonSerializerOptions())!;
     }
 
-    private static async Task SetTaskStatusAsync(
+    private static async Task<ResearchTask> SeedTaskAsync(
         IServiceProvider serviceProvider,
-        Guid taskId,
-        ResearchTaskStatus status)
+        string userName,
+        string ticker,
+        Market market,
+        ResearchTaskStatus status,
+        DateTimeOffset updatedAt)
     {
         using var scope = serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
-        var task = await db.ResearchTasks.FindAsync(taskId);
-        task!.Status = status;
-        task.UpdatedAt = DateTimeOffset.UtcNow;
+        var user = await db.Users.SingleAsync(x => x.UserName == userName);
+        var task = new ResearchTask
+        {
+            UserId = user.Id,
+            Ticker = ticker,
+            Market = market,
+            Status = status,
+            UpdatedAt = updatedAt
+        };
+        db.ResearchTasks.Add(task);
         await db.SaveChangesAsync();
+        return task;
     }
 
     private static async Task SeedTaskChildrenAsync(

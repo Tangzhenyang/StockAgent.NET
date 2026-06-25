@@ -97,7 +97,7 @@ def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnaps
         provider="akshare-a-quote",
     )
     financial_row = _load_a_share_financial_row(ak, normalized)
-    profile_row = _optional_row(lambda: ak.stock_profile_cninfo(symbol=normalized.ticker))
+    profile_row = _load_a_share_profile_row(ak, normalized)
     last_price = _to_float(_pick(quote_row, "最新价", "last", "最新", "收盘", "close", default=None), required_name="lastPrice")
 
     return MarketSnapshotResponse(
@@ -105,7 +105,7 @@ def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnaps
         market="AShare",
         companyName=str(_pick(quote_row, "名称", "name", default=_pick(profile_row or {}, "A股简称", "公司名称", default="A股公司"))),
         lastPrice=last_price,
-        marketCap=_first_number(quote_row, financial_row, ["总市值", "market_cap"], required_name="marketCap"),
+        marketCap=_a_share_market_cap(last_price, quote_row, financial_row, profile_row),
         peRatio=_a_share_pe_ratio(last_price, quote_row, financial_row),
         revenueGrowthPercent=_first_optional_number(
             financial_row,
@@ -142,6 +142,16 @@ def _load_a_share_financial_row(ak: Any, normalized: NormalizedTicker) -> dict[s
             ),
             ["摊薄每股收益(元)", "加权每股收益(元)", "每股收益_调整后(元)", "基本每股收益"],
         ),
+    ]
+    return next((row for row in rows if row), None)
+
+
+def _load_a_share_profile_row(ak: Any, normalized: NormalizedTicker) -> dict[str, Any] | None:
+    """Load A-share profile fields that can help derive missing market values. 加载可用于补齐市值等字段的 A 股资料。"""
+
+    rows = [
+        _optional_key_value_row(lambda: ak.stock_individual_info_em(symbol=normalized.ticker)),
+        _optional_row(lambda: ak.stock_profile_cninfo(symbol=normalized.ticker)),
     ]
     return next((row for row in rows if row), None)
 
@@ -259,6 +269,59 @@ def _eastmoney_plain_number(value: Any) -> float:
     return _to_float(value, required_name="eastmoneyPlainValue", required=False)
 
 
+def _a_share_market_cap(
+    last_price: float,
+    quote_row: dict[str, Any],
+    financial_row: dict[str, Any] | None,
+    profile_row: dict[str, Any] | None,
+) -> float:
+    """Read A-share market capitalization or derive it from share count. 读取 A 股总市值，缺失时用股本推导。"""
+
+    direct = _first_optional_number_from_rows(
+        [quote_row, financial_row, profile_row],
+        ["总市值", "market_cap", "总市值(元)", "总市值（元）"],
+    )
+    if direct:
+        return direct
+
+    shares = _a_share_total_shares(quote_row, financial_row, profile_row)
+    if shares:
+        return last_price * shares
+
+    raise DataSourceProviderError(
+        "Required market field marketCap was not available from real providers.",
+        provider="akshare-market",
+        retryable=True,
+    )
+
+
+def _a_share_total_shares(*rows: dict[str, Any] | None) -> float:
+    """Read total shares from provider rows, normalizing common share units. 读取总股本并归一常见单位。"""
+
+    share_keys = [
+        ("总股本", 1),
+        ("总股本(股)", 1),
+        ("总股本（股）", 1),
+        ("总股本(万股)", 10_000),
+        ("总股本（万股）", 10_000),
+        ("TOTAL_SHARE", 1),
+        ("total_share", 1),
+        ("总股数", 1),
+        ("股本", 1),
+    ]
+    for row in rows:
+        if row is None:
+            continue
+        for key, multiplier in share_keys:
+            if key not in row:
+                continue
+            value = _to_float(row[key], required_name=key, required=False)
+            if value != 0:
+                return value * multiplier
+
+    return 0.0
+
+
 def _a_share_pe_ratio(
     last_price: float,
     quote_row: dict[str, Any],
@@ -368,6 +431,31 @@ def _optional_last_row_with_number(loader: Any, numeric_keys: list[str]) -> dict
     return None
 
 
+def _optional_key_value_row(loader: Any) -> dict[str, Any] | None:
+    """Convert a provider key/value frame into a dictionary. 将提供器的键值表转换为字典。"""
+
+    try:
+        frame = loader()
+    except Exception:
+        return None
+
+    if getattr(frame, "empty", True):
+        return None
+
+    key_column = next((column for column in ["item", "项目", "指标", "key"] if column in frame.columns), None)
+    value_column = next((column for column in ["value", "值", "数值"] if column in frame.columns), None)
+    if key_column is None or value_column is None:
+        return None
+
+    row: dict[str, Any] = {}
+    for record in frame.to_dict("records"):
+        key = str(record.get(key_column, "")).strip()
+        if key:
+            row[key] = record.get(value_column)
+
+    return row or None
+
+
 def _find_first_row(frame: Any, candidate_columns: list[str], expected_code: str) -> dict[str, Any] | None:
     """Find the first matching row by code from a pandas-like frame. 从类似 pandas 的表中按代码查找首行。"""
 
@@ -391,6 +479,17 @@ def _normalize_code_for_match(value: Any) -> str:
     text = str(value).strip().upper()
     digits = "".join(character for character in text if character.isdigit())
     return digits.zfill(6) if len(digits) <= 6 else digits[-6:]
+
+
+def _first_optional_number_from_rows(rows: list[dict[str, Any] | None], keys: list[str]) -> float:
+    """Read the first non-zero number from multiple candidate rows. 从多行候选数据读取首个非零数值。"""
+
+    for row in rows:
+        value = _first_optional_number(row, keys)
+        if value != 0:
+            return value
+
+    return 0.0
 
 
 def _first_number(

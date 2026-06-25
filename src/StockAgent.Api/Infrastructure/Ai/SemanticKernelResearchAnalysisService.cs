@@ -51,13 +51,14 @@ public sealed class SemanticKernelResearchAnalysisService(
             evidenceOutput,
             language);
         var synthesisRun = await RunMeasuredAsync(synthesisAgent, synthesisInput, modelSettings, cancellationToken);
-        AgentOutputValidators.ValidateSynthesis(synthesisRun.Output);
+        var synthesisOutput = SanitizeSynthesisOutput(synthesisRun.Output, evidenceOutput);
+        AgentOutputValidators.ValidateSynthesis(synthesisOutput);
         await SaveInvocationsAsync(researchTaskId, [synthesisRun.Invocation], cancellationToken);
 
         var reviewAgent = new ReviewAgent(chatClient, modelSettings);
         var reviewInput = contextBudgeter.BuildReviewInput(
             marketData,
-            synthesisRun.Output,
+            synthesisOutput,
             evidenceOutput,
             language);
         var reviewRun = await RunMeasuredAsync(reviewAgent, reviewInput, modelSettings, cancellationToken);
@@ -69,12 +70,12 @@ public sealed class SemanticKernelResearchAnalysisService(
         }
 
         return new AiAnalysisResult(
-            synthesisRun.Output.OverallScore,
-            synthesisRun.Output.RiskLevel,
-            synthesisRun.Output.ValuationView,
-            synthesisRun.Output.Summary,
-            synthesisRun.Output.KeyAssumptions,
-            synthesisRun.Output.Markdown,
+            synthesisOutput.OverallScore,
+            synthesisOutput.RiskLevel,
+            synthesisOutput.ValuationView,
+            synthesisOutput.Summary,
+            synthesisOutput.KeyAssumptions,
+            synthesisOutput.Markdown,
             [
                 "MarketFinancialAgent:Succeeded",
                 "EvidenceFilingAgent:Succeeded",
@@ -93,6 +94,28 @@ public sealed class SemanticKernelResearchAnalysisService(
             .ToList();
 
         return output with { Citations = citations };
+    }
+
+    private static SynthesisReportAgentOutput SanitizeSynthesisOutput(
+        SynthesisReportAgentOutput output,
+        EvidenceFilingAgentOutput evidenceOutput)
+    {
+        var allowedEvidenceIds = (evidenceOutput.Citations ?? [])
+            .Select(x => x.EvidenceCardId)
+            .Where(x => x != Guid.Empty)
+            .ToHashSet();
+        var keyClaims = (output.KeyClaims ?? [])
+            .Select(x => x with
+            {
+                EvidenceCardIds = (x.EvidenceCardIds ?? [])
+                    .Where(allowedEvidenceIds.Contains)
+                    .Distinct()
+                    .ToList()
+            })
+            .Where(x => x.EvidenceCardIds.Count > 0)
+            .ToList();
+
+        return output with { KeyClaims = keyClaims };
     }
 
     private static async Task<AgentRunResult<TOutput>> RunMeasuredAsync<TInput, TOutput>(

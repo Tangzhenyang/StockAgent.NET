@@ -15,6 +15,7 @@ def disable_eastmoney_realtime_quote(monkeypatch):
     """Disable real network quote calls unless a test explicitly overrides them. 默认关闭真实网络行情调用，避免测试打外网。"""
 
     monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_quote_row", lambda _normalized: None)
+    monkeypatch.setattr(akshare_market, "_load_a_share_sina_quote_row", lambda _normalized: None, raising=False)
 
 
 def test_market_snapshot_contract(client, auth_headers, monkeypatch):
@@ -166,6 +167,31 @@ def test_a_share_snapshot_prefers_single_stock_realtime_over_daily_close(monkeyp
     assert snapshot.price_freshness == "intraday-delayed"
 
 
+def test_a_share_snapshot_uses_sina_single_stock_quote_when_eastmoney_times_out(monkeypatch):
+    def fake_eastmoney_timeout(normalized):
+        raise TimeoutError("_ssl.c:993: The handshake operation timed out")
+
+    def fake_sina_realtime(normalized):
+        return {
+            "代码": normalized.ticker,
+            "名称": "江波龙",
+            "最新价": 659.01,
+            "总市值": 0,
+            "市盈率-动态": 0,
+            "_quote_source": "sina-hq-single-stock",
+            "_price_freshness": "intraday-delayed",
+        }
+
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_quote_row", fake_eastmoney_timeout, raising=False)
+    monkeypatch.setattr(akshare_market, "_load_a_share_sina_quote_row", fake_sina_realtime, raising=False)
+
+    snapshot = akshare_market._load_a_share_snapshot(None, normalize_ticker("301308"))
+
+    assert snapshot.last_price == 659.01
+    assert snapshot.company_name == "江波龙"
+    assert snapshot.quote_source == "sina-hq-single-stock"
+
+
 def test_a_share_snapshot_skips_all_slow_fallbacks_after_failed_single_stock_quote(monkeypatch):
     def fake_failed_eastmoney_realtime(normalized):
         return None
@@ -250,6 +276,28 @@ def test_eastmoney_single_stock_quote_accepts_price_only_to_avoid_slow_list_fall
     assert row["总市值"] == 0
     assert row["市盈率-动态"] == 0
     assert row["_quote_source"] == "eastmoney-push2-stock-get"
+
+
+def test_sina_single_stock_quote_parses_intraday_price(monkeypatch):
+    class FakeResponse:
+        content = (
+            b'var hq_str_sz301308="'
+            b'\xbd\xad\xb2\xa8\xc1\xfa,655.000,619.980,659.010,688.800,640.000,'
+            b'0,0,169000,11720000000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'
+            b'2026-06-25,11:30:00,00";'
+        )
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+    monkeypatch.setattr(akshare_market.httpx, "get", lambda *args, **kwargs: FakeResponse())
+
+    row = akshare_market._load_a_share_sina_quote_row(normalize_ticker("301308"))
+
+    assert row["名称"] == "江波龙"
+    assert row["最新价"] == 659.01
+    assert row["_quote_source"] == "sina-hq-single-stock"
 
 
 def test_a_share_snapshot_allows_missing_pe_when_price_exists(monkeypatch):

@@ -84,6 +84,7 @@ def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnaps
     quote_row = _first_successful_row(
         [
             lambda: _load_a_share_eastmoney_quote_row(normalized),
+            lambda: _load_a_share_sina_quote_row(normalized),
         ],
         provider="akshare-a-quote",
     )
@@ -236,6 +237,59 @@ def _load_a_share_eastmoney_quote_row(normalized: NormalizedTicker) -> dict[str,
         "_quote_source": "eastmoney-push2-stock-get",
         "_price_freshness": "intraday-delayed",
     }
+
+
+def _load_a_share_sina_quote_row(normalized: NormalizedTicker) -> dict[str, Any] | None:
+    """Load A-share intraday delayed quote from Sina single-stock API. 从新浪单股接口加载 A 股盘中延迟行情。"""
+
+    symbol = _a_share_prefixed_symbol(normalized.ticker)
+    response = httpx.get(
+        "http://hq.sinajs.cn/list=" + symbol,
+        headers={
+            "Referer": "https://finance.sina.com.cn/",
+            "User-Agent": "Mozilla/5.0 StockAgent.NET datasource",
+        },
+        timeout=5,
+    )
+    response.raise_for_status()
+    payload = _decode_sina_quote_payload(response)
+    if not payload:
+        return None
+
+    parts = payload.split(",")
+    if len(parts) < 4:
+        return None
+
+    latest_price = _to_float(parts[3], required_name="sinaLatestPrice", required=False)
+    if latest_price == 0:
+        return None
+
+    return {
+        "代码": normalized.ticker,
+        "名称": parts[0] or "A股公司",
+        "最新价": latest_price,
+        "总市值": 0,
+        "市盈率-动态": 0,
+        "_quote_source": "sina-hq-single-stock",
+        "_price_freshness": "intraday-delayed",
+    }
+
+
+def _decode_sina_quote_payload(response: Any) -> str:
+    """Decode Sina quote JavaScript payload and return the comma-separated body. 解码新浪行情脚本并返回逗号分隔正文。"""
+
+    content = getattr(response, "content", b"")
+    if isinstance(content, bytes) and content:
+        text = content.decode("gb18030", errors="ignore")
+    else:
+        text = str(getattr(response, "text", ""))
+
+    start = text.find('"')
+    end = text.rfind('"')
+    if start == -1 or end <= start:
+        return ""
+
+    return text[start + 1 : end]
 
 
 def _eastmoney_secid(ticker: str) -> str:

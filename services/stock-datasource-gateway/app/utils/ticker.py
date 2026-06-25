@@ -29,4 +29,10 @@ def normalize_ticker(raw_ticker: str) -> NormalizedTicker:
     if ticker.isdigit() and len(ticker) == 6:
         return NormalizedTicker(ticker, "AShare")
 
+    for suffix in (".SH", ".SZ"):
+        if ticker.endswith(suffix):
+            numeric = ticker.removesuffix(suffix)
+            if numeric.isdigit() and len(numeric) == 6:
+                return NormalizedTicker(numeric, "AShare")
+
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported ticker format.")

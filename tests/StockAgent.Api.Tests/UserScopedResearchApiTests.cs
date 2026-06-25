@@ -80,6 +80,7 @@ public sealed class UserScopedResearchApiTests
         (await alice.GetAsync($"/api/research-tasks/{bobTask.Id}/report")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await alice.GetAsync($"/api/research-tasks/{bobTask.Id}/evidence")).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await alice.PostAsync($"/api/research-tasks/{bobTask.Id}/pdf", null)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await alice.DeleteAsync($"/api/research-tasks/{bobTask.Id}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     private static async Task<ResearchTaskResponse> CreateTaskAsync(HttpClient client, string ticker)

@@ -145,7 +145,71 @@ public static class ResearchTaskEndpoints
             return Results.Ok(steps);
         });
 
+        group.MapDelete("/{id:guid}", async (
+            Guid id,
+            StockAgentDbContext db,
+            ICurrentUser currentUser,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = currentUser.RequireUserId();
+            var task = await db.ResearchTasks.FirstOrDefaultAsync(
+                x => x.Id == id && x.UserId == userId,
+                cancellationToken);
+            if (task is null)
+            {
+                return Results.NotFound();
+            }
+
+            if (!CanDelete(task.Status))
+            {
+                return Results.Conflict(new { error = "Only failed, completed, ready, or cancelled tasks can be deleted." });
+            }
+
+            var sources = await db.DocumentSources
+                .Where(x => x.ResearchTaskId == id)
+                .ToListAsync(cancellationToken);
+            var sourceIds = sources.Select(x => x.Id).ToList();
+            var chunks = await db.DocumentChunks
+                .Where(x => sourceIds.Contains(x.DocumentSourceId))
+                .ToListAsync(cancellationToken);
+            var evidenceCards = await db.EvidenceCards
+                .Where(x => x.ResearchTaskId == id)
+                .ToListAsync(cancellationToken);
+            var reports = await db.ResearchReports
+                .Where(x => x.ResearchTaskId == id)
+                .ToListAsync(cancellationToken);
+            var pdfExports = await db.PdfExports
+                .Where(x => x.ResearchTaskId == id)
+                .ToListAsync(cancellationToken);
+            var invocations = await db.ModelInvocations
+                .Where(x => x.ResearchTaskId == id)
+                .ToListAsync(cancellationToken);
+            var steps = await db.ResearchSteps
+                .Where(x => x.ResearchTaskId == id)
+                .ToListAsync(cancellationToken);
+
+            db.DocumentChunks.RemoveRange(chunks);
+            db.EvidenceCards.RemoveRange(evidenceCards);
+            db.DocumentSources.RemoveRange(sources);
+            db.ResearchReports.RemoveRange(reports);
+            db.PdfExports.RemoveRange(pdfExports);
+            db.ModelInvocations.RemoveRange(invocations);
+            db.ResearchSteps.RemoveRange(steps);
+            db.ResearchTasks.Remove(task);
+            await db.SaveChangesAsync(cancellationToken);
+
+            return Results.NoContent();
+        });
+
         return app;
+    }
+
+    private static bool CanDelete(ResearchTaskStatus status)
+    {
+        return status is ResearchTaskStatus.Failed
+            or ResearchTaskStatus.Ready
+            or ResearchTaskStatus.Completed
+            or ResearchTaskStatus.Cancelled;
     }
 
     private static ResearchTaskResponse ToResponse(ResearchTask task)

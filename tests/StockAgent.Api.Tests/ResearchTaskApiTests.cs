@@ -126,6 +126,64 @@ public sealed class ResearchTaskApiTests
         steps[1].GetProperty("isLongRunning").GetBoolean().Should().BeFalse();
     }
 
+    /// <summary>
+    /// Deleting a failed task removes its diagnostic and generated child records.
+    /// 删除失败任务会清理其诊断记录和生成的子记录。
+    /// </summary>
+    [Fact]
+    public async Task DeleteResearchTask_RemovesFailedTaskWithChildren()
+    {
+        await using var factory = TestApplicationFactory.Create();
+
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true
+        });
+        await TestApplicationFactory.RegisterAndLoginAsync(client, "delete-failed-task-user");
+
+        var task = await CreateTaskAsync(client, "700");
+        await SeedTaskChildrenAsync(factory.Services, task.Id, ResearchTaskStatus.Failed);
+
+        var response = await client.DeleteAsync($"/api/research-tasks/{task.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
+        (await db.ResearchTasks.FindAsync(task.Id)).Should().BeNull();
+        db.ResearchSteps.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
+        db.ResearchReports.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
+        db.EvidenceCards.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
+        db.DocumentSources.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
+        db.DocumentChunks.Should().BeEmpty();
+        db.ModelInvocations.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
+        db.PdfExports.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Deleting a running task is rejected to avoid racing the background worker.
+    /// 删除运行中任务会被拒绝，以避免和后台工作器竞争。
+    /// </summary>
+    [Fact]
+    public async Task DeleteResearchTask_RejectsActiveTask()
+    {
+        await using var factory = TestApplicationFactory.Create();
+
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true
+        });
+        await TestApplicationFactory.RegisterAndLoginAsync(client, "delete-active-task-user");
+
+        var task = await CreateTaskAsync(client, "700");
+        await SetTaskStatusAsync(factory.Services, task.Id, ResearchTaskStatus.CollectingData);
+
+        var response = await client.DeleteAsync($"/api/research-tasks/{task.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
     private static async Task<ResearchTaskResponse> CreateTaskAsync(HttpClient client, string ticker)
     {
         var response = await client.PostAsJsonAsync(
@@ -134,6 +192,90 @@ public sealed class ResearchTaskApiTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var json = await response.Content.ReadAsStringAsync();
         return JsonSerializer.Deserialize<ResearchTaskResponse>(json, CreateJsonSerializerOptions())!;
+    }
+
+    private static async Task SetTaskStatusAsync(
+        IServiceProvider serviceProvider,
+        Guid taskId,
+        ResearchTaskStatus status)
+    {
+        using var scope = serviceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
+        var task = await db.ResearchTasks.FindAsync(taskId);
+        task!.Status = status;
+        task.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedTaskChildrenAsync(
+        IServiceProvider serviceProvider,
+        Guid taskId,
+        ResearchTaskStatus status)
+    {
+        using var scope = serviceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
+        var task = await db.ResearchTasks.FindAsync(taskId);
+        task!.Status = status;
+        task.UpdatedAt = DateTimeOffset.UtcNow;
+
+        var sourceId = Guid.NewGuid();
+        var chunkId = Guid.NewGuid();
+        db.ResearchSteps.Add(new ResearchStep
+        {
+            ResearchTaskId = taskId,
+            StepName = ResearchStage.CollectStructuredData,
+            Status = StepStatus.Failed
+        });
+        db.DocumentSources.Add(new DocumentSource
+        {
+            Id = sourceId,
+            ResearchTaskId = taskId,
+            Url = "https://example.com",
+            Title = "source",
+            SourceType = "news",
+            ContentHash = Guid.NewGuid().ToString("N")
+        });
+        db.DocumentChunks.Add(new DocumentChunk
+        {
+            Id = chunkId,
+            DocumentSourceId = sourceId,
+            ChunkIndex = 0,
+            Text = "chunk",
+            TokenEstimate = 1
+        });
+        db.EvidenceCards.Add(new EvidenceCard
+        {
+            ResearchTaskId = taskId,
+            DocumentSourceId = sourceId,
+            DocumentChunkId = chunkId,
+            Claim = "claim",
+            Snippet = "snippet",
+            Confidence = 0.8m,
+            Relevance = 0.9m,
+            ReportSection = "Business"
+        });
+        db.ResearchReports.Add(new ResearchReport
+        {
+            ResearchTaskId = taskId,
+            Markdown = "# report",
+            Html = "<h1>report</h1>",
+            RatingJson = "{}"
+        });
+        db.ModelInvocations.Add(new ModelInvocation
+        {
+            ResearchTaskId = taskId,
+            StepName = "agent",
+            Provider = "test",
+            ModelName = "test",
+            DurationMs = 1,
+            Status = "Succeeded"
+        });
+        db.PdfExports.Add(new PdfExport
+        {
+            ResearchTaskId = taskId,
+            Status = "Completed"
+        });
+        await db.SaveChangesAsync();
     }
 
     private static JsonSerializerOptions CreateJsonSerializerOptions()

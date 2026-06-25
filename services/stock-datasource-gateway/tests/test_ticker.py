@@ -25,6 +25,13 @@ def test_resolves_a_share_ticker():
     assert normalized.market == "AShare"
 
 
+def test_resolves_suffixed_a_share_ticker():
+    normalized = normalize_ticker("300476.SZ")
+
+    assert normalized.ticker == "300476"
+    assert normalized.market == "AShare"
+
+
 def test_rejects_unsupported_ticker():
     with pytest.raises(HTTPException):
         normalize_ticker("not-a-code")

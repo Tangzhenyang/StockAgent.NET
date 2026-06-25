@@ -197,9 +197,9 @@ a {
 }
 
 .taskItem {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   min-height: 44px;
   border: 1px solid #d9dee7;
@@ -208,6 +208,35 @@ a {
   background: #ffffff;
   color: #17202a;
   text-align: left;
+}
+
+.taskSelectButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.taskSelectButton span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskDeleteButton {
+  min-height: 30px;
+  border: 1px solid #d4dbe6;
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: #ffffff;
+  color: #b42318;
+  font-size: 13px;
 }
 
 .taskItem.active,

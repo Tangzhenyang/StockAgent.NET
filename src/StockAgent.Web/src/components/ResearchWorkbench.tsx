@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { useMemo, useState } from 'react';
 import {
   createResearchTask,
+  deleteResearchTask,
   downloadResearchReportPdf,
   exportResearchReportPdf,
   getResearchReport,
@@ -17,14 +18,15 @@ import { TaskStepDetails } from './TaskStepDetails';
 import { TaskTimeline } from './TaskTimeline';
 
 const completedStatuses = new Set<ResearchTask['status']>(['Ready', 'Completed']);
+const deletableStatuses = new Set<ResearchTask['status']>(['Failed', 'Ready', 'Completed', 'Cancelled']);
 
 /**
  * Main first-screen workbench for submitting stock research tasks and reading reports.
  */
 export function ResearchWorkbench() {
   const queryClient = useQueryClient();
-  const [ticker, setTicker] = useState('00700.HK');
-  const [market, setMarket] = useState<'AShare' | 'HongKong'>('HongKong');
+  const [ticker, setTicker] = useState('600519');
+  const [market, setMarket] = useState<'AShare' | 'HongKong'>('AShare');
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
 
   const tasksQuery = useQuery({
@@ -72,6 +74,21 @@ export function ResearchWorkbench() {
       return exported;
     },
   });
+  const deleteMutation = useMutation({
+    mutationFn: deleteResearchTask,
+    onSuccess: async (_, taskId) => {
+      if (selectedTaskId === taskId) {
+        setSelectedTaskId(undefined);
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['researchTasks'] }),
+        queryClient.removeQueries({ queryKey: ['researchReport', taskId] }),
+        queryClient.removeQueries({ queryKey: ['researchEvidence', taskId] }),
+        queryClient.removeQueries({ queryKey: ['researchSteps', taskId] }),
+      ]);
+    },
+  });
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -99,18 +116,32 @@ export function ResearchWorkbench() {
           </button>
         </form>
         <section className="taskList" aria-label="研究任务">
-          {tasks.map((task) => (
-            <button
-              key={task.id}
-              type="button"
-              className={task.id === selectedTask?.id ? 'taskItem active' : 'taskItem'}
-              onClick={() => setSelectedTaskId(task.id)}
-            >
-              <span>{task.ticker}</span>
-              <small>{task.status}</small>
-            </button>
-          ))}
+          {tasks.map((task) => {
+            const canDelete = deletableStatuses.has(task.status);
+            return (
+              <div key={task.id} className={task.id === selectedTask?.id ? 'taskItem active' : 'taskItem'}>
+                <button type="button" className="taskSelectButton" onClick={() => setSelectedTaskId(task.id)}>
+                  <span>{task.ticker}</span>
+                  <small>{task.status}</small>
+                </button>
+                <button
+                  type="button"
+                  className="taskDeleteButton"
+                  disabled={!canDelete || deleteMutation.isPending}
+                  title={canDelete ? '删除记录' : '运行中任务不能删除'}
+                  onClick={() => {
+                    if (window.confirm(`确认删除 ${task.ticker} 的研究记录？`)) {
+                      deleteMutation.mutate(task.id);
+                    }
+                  }}
+                >
+                  删除
+                </button>
+              </div>
+            );
+          })}
         </section>
+        {deleteMutation.isError && <p className="formError">删除失败，请确认任务已结束。</p>}
       </aside>
       <section className="content">
         {selectedTask && <TaskTimeline status={selectedTask.status} />}

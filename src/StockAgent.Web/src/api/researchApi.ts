@@ -36,6 +36,20 @@ export async function listResearchTasks(status?: 'completed'): Promise<ResearchT
 }
 
 /**
+ * Deletes a terminal research task and its generated child records.
+ */
+export async function deleteResearchTask(taskId: string): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/research-tasks/${taskId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    throw new Error(`Delete research task failed with ${response.status}`);
+  }
+}
+
+/**
  * Loads a generated report for the selected task.
  */
 export async function getResearchReport(taskId: string): Promise<ResearchReport> {

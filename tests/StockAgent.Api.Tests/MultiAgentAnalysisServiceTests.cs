@@ -209,6 +209,58 @@ public sealed class MultiAgentAnalysisServiceTests
     }
 
     /// <summary>
+    /// Synthesis key claims without evidence card ids are removed instead of failing the workflow.
+    /// 综合 Agent 返回无证据绑定关键结论时会被移除，而不是让工作流失败。
+    /// </summary>
+    [Fact]
+    public async Task SemanticKernelResearchAnalysisService_DropsUnboundSynthesisKeyClaims()
+    {
+        await using var factory = TestApplicationFactory.Create();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
+        var client = new SequenceModelChatClient(
+            """
+            {"score":70,"valuationView":"估值偏高","strengths":["净利率高"],"risks":["PE 偏高"],"followUpQuestions":[]}
+            """,
+            """
+            {"positiveFacts":["年度报告已披露"],"negativeFacts":[],"uncertainties":[],"citations":[{"evidenceCardId":"11111111-1111-1111-1111-111111111111","title":"年报","snippet":"收入增长","sourceDate":null}]}
+            """,
+            """
+            {"overallScore":68,"riskLevel":"中等","valuationView":"估值偏高","summary":"摘要","keyAssumptions":[],"keyClaims":[{"claim":"盈利质量稳定","evidenceCardIds":[]}],"markdown":"# 报告"}
+            """,
+            """
+            {"approved":true,"issues":[],"revisionInstruction":""}
+            """);
+        var service = new SemanticKernelResearchAnalysisService(
+            client,
+            new AgentContextBudgeter(new AgentContextBudgetOptions()),
+            db,
+            NullLogger<SemanticKernelResearchAnalysisService>.Instance);
+        var evidence = new[]
+        {
+            new EvidenceCard
+            {
+                Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                Claim = "年报披露收入增长",
+                Snippet = "收入增长",
+                Relevance = 0.92m,
+                Confidence = 0.82m,
+                ReportSection = "Financials"
+            }
+        };
+
+        var result = await service.AnalyzeAsync(
+            Guid.NewGuid(),
+            CreateSnapshot(),
+            evidence,
+            new ModelRuntimeSettings("OpenAICompatible", "https://example.test/v1", "test-model", "test-key"),
+            "zh-CN",
+            CancellationToken.None);
+
+        result.ReportMarkdown.Should().Contain("# 报告");
+    }
+
+    /// <summary>
     /// Fixed-flow analysis writes one model invocation record per agent.
     /// 固定流程分析会为每个 Agent 写入一条模型调用记录。
     /// </summary>

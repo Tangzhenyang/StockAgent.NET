@@ -114,6 +114,31 @@ public sealed class MultiAgentAnalysisServiceTests
     }
 
     /// <summary>
+    /// MarketFinancialAgent tolerates model scores returned as strings with units.
+    /// MarketFinancialAgent 可以容忍模型把评分返回为带单位的字符串。
+    /// </summary>
+    [Fact]
+    public async Task MarketFinancialAgent_ParsesStringScoreModelOutput()
+    {
+        var client = new FakeModelChatClient("""
+        {
+          "score": "70分",
+          "valuationView": "估值偏高",
+          "strengths": ["净利率稳定"],
+          "risks": ["PE 偏高"],
+          "followUpQuestions": []
+        }
+        """);
+        var agent = new MarketFinancialAgent(client);
+
+        var output = await agent.RunAsync(
+            new MarketFinancialAgentInput(CreateSnapshot(), null, "zh-CN"),
+            CancellationToken.None);
+
+        output.Score.Should().Be(70);
+    }
+
+    /// <summary>
     /// Fixed-flow analysis returns the synthesis result when review approves.
     /// 审核通过时固定流程分析会返回综合结果。
     /// </summary>

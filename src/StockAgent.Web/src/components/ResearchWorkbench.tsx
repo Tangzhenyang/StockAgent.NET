@@ -19,6 +19,7 @@ import { TaskTimeline } from './TaskTimeline';
 
 const completedStatuses = new Set<ResearchTask['status']>(['Ready', 'Completed']);
 const deletableStatuses = new Set<ResearchTask['status']>(['Failed', 'Ready', 'Completed', 'Cancelled']);
+const staleTaskDeleteMs = 10 * 60 * 1000;
 
 /**
  * Main first-screen workbench for submitting stock research tasks and reading reports.
@@ -117,7 +118,7 @@ export function ResearchWorkbench() {
         </form>
         <section className="taskList" aria-label="研究任务">
           {tasks.map((task) => {
-            const canDelete = deletableStatuses.has(task.status);
+            const canDelete = canDeleteTask(task);
             return (
               <div key={task.id} className={task.id === selectedTask?.id ? 'taskItem active' : 'taskItem'}>
                 <button type="button" className="taskSelectButton" onClick={() => setSelectedTaskId(task.id)}>
@@ -128,7 +129,7 @@ export function ResearchWorkbench() {
                   type="button"
                   className="taskDeleteButton"
                   disabled={!canDelete || deleteMutation.isPending}
-                  title={canDelete ? '删除记录' : '运行中任务不能删除'}
+                  title={canDelete ? '删除记录' : '任务仍在运行，超过 10 分钟未更新后可删除'}
                   onClick={() => {
                     if (window.confirm(`确认删除 ${task.ticker} 的研究记录？`)) {
                       deleteMutation.mutate(task.id);
@@ -167,4 +168,12 @@ export function ResearchWorkbench() {
       </section>
     </main>
   );
+}
+
+function canDeleteTask(task: ResearchTask) {
+  if (deletableStatuses.has(task.status)) {
+    return true;
+  }
+
+  return Date.now() - new Date(task.updatedAt).getTime() >= staleTaskDeleteMs;
 }

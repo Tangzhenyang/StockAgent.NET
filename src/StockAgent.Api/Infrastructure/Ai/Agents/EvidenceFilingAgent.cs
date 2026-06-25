@@ -29,6 +29,7 @@ public sealed class EvidenceFilingAgent(
         你只能基于输入 evidencePack 提取事实、正面证据、负面证据和不确定性。
         每条关键事实必须能追溯到 evidenceCardId。
         必须只输出 JSON，字段为 positiveFacts, negativeFacts, uncertainties, citations。
+        citations 必须是对象数组，每个对象包含 evidenceCardId, title, snippet, sourceDate；不要返回字符串数组。
         """;
     }
 

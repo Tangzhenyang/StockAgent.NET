@@ -12,7 +12,7 @@ public abstract class JsonAgentBase<TInput, TOutput>(
     IModelChatClient chatClient,
     ModelRuntimeSettings modelSettings) : IResearchAgent<TInput, TOutput>
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     /// <inheritdoc />
     public abstract string Name { get; }
@@ -34,6 +34,13 @@ public abstract class JsonAgentBase<TInput, TOutput>(
 
     /// <summary>Builds the user prompt from typed input. 从强类型输入构建 user prompt。</summary>
     protected abstract string BuildUserPrompt(TInput input);
+
+    private static JsonSerializerOptions CreateJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new EvidenceCitationJsonConverter());
+        return options;
+    }
 
     private static TOutput Deserialize(string json)
     {

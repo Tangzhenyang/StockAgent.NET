@@ -39,15 +39,16 @@ public sealed class SemanticKernelResearchAnalysisService(
         var marketTask = RunMeasuredAsync(marketAgent, marketInput, modelSettings, cancellationToken);
         var evidenceTask = RunMeasuredAsync(evidenceAgent, evidenceInput, modelSettings, cancellationToken);
         await Task.WhenAll(marketTask, evidenceTask);
+        var evidenceOutput = SanitizeEvidenceOutput(evidenceTask.Result.Output, evidenceInput);
         AgentOutputValidators.ValidateMarket(marketTask.Result.Output);
-        AgentOutputValidators.ValidateEvidence(evidenceTask.Result.Output, evidenceInput);
+        AgentOutputValidators.ValidateEvidence(evidenceOutput, evidenceInput);
         await SaveInvocationsAsync(researchTaskId, [marketTask.Result.Invocation, evidenceTask.Result.Invocation], cancellationToken);
 
         var synthesisAgent = new SynthesisReportAgent(chatClient, modelSettings);
         var synthesisInput = contextBudgeter.BuildSynthesisInput(
             marketData,
             marketTask.Result.Output,
-            evidenceTask.Result.Output,
+            evidenceOutput,
             language);
         var synthesisRun = await RunMeasuredAsync(synthesisAgent, synthesisInput, modelSettings, cancellationToken);
         AgentOutputValidators.ValidateSynthesis(synthesisRun.Output);
@@ -57,7 +58,7 @@ public sealed class SemanticKernelResearchAnalysisService(
         var reviewInput = contextBudgeter.BuildReviewInput(
             marketData,
             synthesisRun.Output,
-            evidenceTask.Result.Output,
+            evidenceOutput,
             language);
         var reviewRun = await RunMeasuredAsync(reviewAgent, reviewInput, modelSettings, cancellationToken);
         await SaveInvocationsAsync(researchTaskId, [reviewRun.Invocation], cancellationToken);
@@ -80,6 +81,18 @@ public sealed class SemanticKernelResearchAnalysisService(
                 "SynthesisReportAgent:Succeeded",
                 "ReviewAgent:Approved"
             ]);
+    }
+
+    private static EvidenceFilingAgentOutput SanitizeEvidenceOutput(
+        EvidenceFilingAgentOutput output,
+        EvidenceFilingAgentInput input)
+    {
+        var allowedEvidenceIds = input.EvidencePack.Select(x => x.EvidenceCardId).ToHashSet();
+        var citations = (output.Citations ?? [])
+            .Where(x => x.EvidenceCardId != Guid.Empty && allowedEvidenceIds.Contains(x.EvidenceCardId))
+            .ToList();
+
+        return output with { Citations = citations };
     }
 
     private static async Task<AgentRunResult<TOutput>> RunMeasuredAsync<TInput, TOutput>(

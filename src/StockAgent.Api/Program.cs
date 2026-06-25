@@ -120,7 +120,12 @@ builder.Services.AddSingleton<IResearchTaskQueue, ResearchTaskQueue>();
 builder.Services.AddScoped<FakeMarketDataProvider>();
 builder.Services.AddScoped<FakeWebResearchProvider>();
 builder.Services.AddScoped<FakeIndustryResearchProvider>();
-builder.Services.AddHttpClient<IMarketDataProvider, ConfiguredMarketDataProvider>();
+builder.Services.AddHttpClient<IMarketDataProvider, ConfiguredMarketDataProvider>(client =>
+{
+    // Keep the first research step responsive; the A-share data gateway uses fast single-stock quote calls.
+    // 保持研究第一步快速失败；A 股数据网关使用快速单股行情接口。
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 builder.Services.AddHttpClient<IWebResearchProvider, ConfiguredWebResearchProvider>();
 builder.Services.AddHttpClient<IIndustryResearchProvider, ConfiguredIndustryResearchProvider>();
 builder.Services.AddScoped<DocumentChunker>();

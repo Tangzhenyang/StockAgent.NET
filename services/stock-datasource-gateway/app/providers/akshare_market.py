@@ -10,7 +10,10 @@ from app.utils.ticker import NormalizedTicker
 
 
 def load_market_snapshot(normalized: NormalizedTicker) -> MarketSnapshotResponse:
-    """Load a real market and financial snapshot from AKShare. 从 AKShare 加载真实行情和财务快照。"""
+    """Load a real market and financial snapshot from the configured real providers. 从真实数据提供器加载行情和财务快照。"""
+
+    if normalized.market == "AShare":
+        return _load_a_share_snapshot(None, normalized)
 
     try:
         import akshare as ak  # type: ignore[import-not-found]
@@ -76,28 +79,16 @@ def _load_hong_kong_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSna
 
 
 def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnapshotResponse:
-    """Load an A-share stock snapshot from AKShare spot and financial indicators. 加载 A 股行情和财务指标。"""
+    """Load an A-share snapshot from a fast single-stock quote endpoint. 从快速单股接口加载 A 股快照。"""
 
     quote_row = _first_successful_row(
         [
             lambda: _load_a_share_eastmoney_quote_row(normalized),
-            lambda: _with_quote_meta(
-                _find_first_row(ak.stock_zh_a_spot_em(), ["代码", "code"], normalized.ticker),
-                "akshare-a-spot-em",
-                "intraday-delayed",
-            ),
-            lambda: _with_quote_meta(
-                _find_first_row(ak.stock_zh_a_spot(), ["代码", "code", "symbol"], normalized.ticker),
-                "akshare-a-spot",
-                "intraday-delayed",
-            ),
-            lambda: _load_a_share_daily_quote_row(ak, normalized),
-            lambda: _load_a_share_tx_quote_row(ak, normalized),
         ],
         provider="akshare-a-quote",
     )
-    financial_row = _load_a_share_financial_row(ak, normalized)
-    profile_row = _load_a_share_profile_row(ak, normalized)
+    financial_row = None
+    profile_row = None
     last_price = _to_float(_pick(quote_row, "最新价", "last", "最新", "收盘", "close", default=None), required_name="lastPrice")
 
     return MarketSnapshotResponse(

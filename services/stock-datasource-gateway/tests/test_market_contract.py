@@ -60,98 +60,66 @@ def test_market_snapshot_returns_502_when_provider_has_no_real_data(client, auth
     assert response.json()["provider"] == "akshare-market"
 
 
-def test_a_share_snapshot_uses_single_stock_daily_when_realtime_lists_fail(monkeypatch):
-    pd = __import__("pandas")
+def test_a_share_snapshot_fails_fast_when_single_stock_quote_is_unavailable(monkeypatch):
+    def fake_missing_eastmoney_quote(normalized):
+        return None
+
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_quote_row", fake_missing_eastmoney_quote, raising=False)
 
     class FakeAk:
         @staticmethod
         def stock_zh_a_spot_em():
-            raise RuntimeError("spot list unavailable")
+            raise AssertionError("slow realtime list should not be reached")
 
         @staticmethod
         def stock_zh_a_spot():
-            raise RuntimeError("sina list unavailable")
+            raise AssertionError("secondary slow realtime list should not be reached")
 
         @staticmethod
         def stock_zh_a_daily(symbol, start_date, end_date, adjust):
-            assert symbol == "sh600519"
-            return pd.DataFrame(
-                [
-                    {
-                        "date": "2026-06-22",
-                        "close": 1241.41,
-                        "outstanding_share": 1_250_082_000,
-                    }
-                ]
-            )
+            raise AssertionError("slow daily fallback should not be reached")
 
         @staticmethod
         def stock_financial_analysis_indicator(symbol, start_year):
-            assert symbol == "600519"
-            return pd.DataFrame(
-                [
-                    {
-                        "日期": "2026-03-31",
-                        "主营业务收入增长率(%)": 6.538,
-                        "销售净利率(%)": 52.2245,
-                        "摊薄每股收益(元)": 22.4822,
-                    }
-                ]
-            )
+            raise AssertionError("slow financial enrichment should not be reached")
 
         @staticmethod
         def stock_profile_cninfo(symbol):
-            return pd.DataFrame([{"公司名称": "贵州茅台酒股份有限公司", "A股简称": "贵州茅台"}])
+            raise AssertionError("slow profile enrichment should not be reached")
 
-    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("600519"))
-
-    assert snapshot.company_name == "贵州茅台"
-    assert snapshot.last_price == 1241.41
-    assert snapshot.market_cap == 1241.41 * 1_250_082_000
-    assert snapshot.pe_ratio > 0
-    assert snapshot.revenue_growth_percent == 6.538
-    assert snapshot.net_margin_percent == 52.2245
+    with pytest.raises(Exception, match="No real quote row returned"):
+        akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("600519"))
 
 
-def test_a_share_snapshot_prefers_realtime_spot_over_daily_close(monkeypatch):
-    pd = __import__("pandas")
+def test_a_share_snapshot_does_not_use_slow_spot_lists_when_single_quote_fails(monkeypatch):
+    def fake_missing_eastmoney_quote(normalized):
+        return None
+
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_quote_row", fake_missing_eastmoney_quote, raising=False)
 
     class FakeAk:
         @staticmethod
         def stock_zh_a_spot_em():
-            return pd.DataFrame(
-                [
-                    {
-                        "代码": "301308",
-                        "名称": "江波龙",
-                        "最新价": 700.25,
-                        "总市值": 190_000_000_000,
-                        "市盈率-动态": 68.2,
-                    }
-                ]
-            )
+            raise AssertionError("slow realtime list should not be reached")
 
         @staticmethod
         def stock_zh_a_spot():
-            raise AssertionError("daily fallback should not be reached when realtime spot is available")
+            raise AssertionError("secondary slow realtime list should not be reached")
 
         @staticmethod
         def stock_zh_a_daily(symbol, start_date, end_date, adjust):
-            raise AssertionError("daily fallback should not be reached when realtime spot is available")
+            raise AssertionError("slow daily fallback should not be reached")
 
         @staticmethod
         def stock_financial_analysis_indicator_em(symbol, indicator):
-            return pd.DataFrame([{"EPSJB": 5.0, "TOTALOPERATEREVETZ": 132.7, "XSJLL": 40.1}])
+            raise AssertionError("slow financial enrichment should not be reached")
 
         @staticmethod
         def stock_profile_cninfo(symbol):
-            return pd.DataFrame([{"A股简称": "江波龙"}])
+            raise AssertionError("slow profile enrichment should not be reached")
 
-    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
-
-    assert snapshot.last_price == 700.25
-    assert snapshot.quote_source == "akshare-a-spot-em"
-    assert snapshot.price_freshness == "intraday-delayed"
+    with pytest.raises(Exception, match="No real quote row returned"):
+        akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
 
 
 def test_a_share_snapshot_prefers_single_stock_realtime_over_daily_close(monkeypatch):
@@ -198,146 +166,62 @@ def test_a_share_snapshot_prefers_single_stock_realtime_over_daily_close(monkeyp
     assert snapshot.price_freshness == "intraday-delayed"
 
 
-def test_a_share_snapshot_skips_incomplete_single_stock_realtime(monkeypatch):
-    pd = __import__("pandas")
-
-    def fake_incomplete_eastmoney_realtime(normalized):
+def test_a_share_snapshot_skips_all_slow_fallbacks_after_failed_single_stock_quote(monkeypatch):
+    def fake_failed_eastmoney_realtime(normalized):
         return None
 
     monkeypatch.setattr(
         akshare_market,
         "_load_a_share_eastmoney_quote_row",
-        fake_incomplete_eastmoney_realtime,
+        fake_failed_eastmoney_realtime,
         raising=False,
     )
 
     class FakeAk:
         @staticmethod
         def stock_zh_a_spot_em():
-            return pd.DataFrame(
-                [
-                    {
-                        "代码": "301308",
-                        "名称": "江波龙",
-                        "最新价": 659.01,
-                        "总市值": 278_800_000_000,
-                        "市盈率-动态": 67.3,
-                    }
-                ]
-            )
+            raise AssertionError("slow realtime list should not be reached")
 
         @staticmethod
         def stock_zh_a_spot():
-            raise AssertionError("secondary spot should not be reached")
+            raise AssertionError("secondary slow realtime list should not be reached")
 
         @staticmethod
         def stock_zh_a_daily(symbol, start_date, end_date, adjust):
-            raise AssertionError("daily fallback should not be reached")
+            raise AssertionError("slow daily fallback should not be reached")
 
         @staticmethod
         def stock_financial_analysis_indicator_em(symbol, indicator):
-            return pd.DataFrame([{"EPSJB": 5.0, "TOTALOPERATEREVETZ": 132.7, "XSJLL": 40.1}])
+            raise AssertionError("slow financial enrichment should not be reached")
 
         @staticmethod
         def stock_profile_cninfo(symbol):
-            return pd.DataFrame([{"A股简称": "江波龙"}])
+            raise AssertionError("slow profile enrichment should not be reached")
 
-    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
-
-    assert snapshot.last_price == 659.01
-    assert snapshot.quote_source == "akshare-a-spot-em"
+    with pytest.raises(Exception, match="No real quote row returned"):
+        akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
 
 
-def test_a_share_snapshot_derives_market_cap_from_total_shares_when_quote_lacks_market_cap(monkeypatch):
-    pd = __import__("pandas")
+def test_a_share_market_cap_derives_from_total_shares():
+    market_cap = akshare_market._a_share_market_cap(
+        659.01,
+        {"最新价": 659.01},
+        None,
+        {"总股本": 422_000_000},
+    )
 
-    class FakeAk:
-        @staticmethod
-        def stock_zh_a_spot_em():
-            return pd.DataFrame(
-                [
-                    {
-                        "代码": "301308",
-                        "名称": "江波龙",
-                        "最新价": 659.01,
-                        "市盈率-动态": 67.3,
-                    }
-                ]
-            )
-
-        @staticmethod
-        def stock_zh_a_spot():
-            raise AssertionError("secondary spot should not be reached")
-
-        @staticmethod
-        def stock_zh_a_daily(symbol, start_date, end_date, adjust):
-            raise AssertionError("daily fallback should not be reached")
-
-        @staticmethod
-        def stock_financial_analysis_indicator_em(symbol, indicator):
-            return pd.DataFrame([{"EPSJB": 5.0, "TOTALOPERATEREVETZ": 132.7, "XSJLL": 40.1}])
-
-        @staticmethod
-        def stock_individual_info_em(symbol):
-            return pd.DataFrame(
-                [
-                    {"item": "股票简称", "value": "江波龙"},
-                    {"item": "总股本", "value": 422_000_000},
-                ]
-            )
-
-        @staticmethod
-        def stock_profile_cninfo(symbol):
-            return pd.DataFrame([{"A股简称": "江波龙"}])
-
-    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
-
-    assert snapshot.market_cap == 659.01 * 422_000_000
-    assert snapshot.quote_source == "akshare-a-spot-em"
+    assert market_cap == 659.01 * 422_000_000
 
 
-def test_a_share_snapshot_allows_missing_market_cap_when_price_and_pe_exist(monkeypatch):
-    pd = __import__("pandas")
+def test_a_share_market_cap_returns_zero_when_missing():
+    market_cap = akshare_market._a_share_market_cap(
+        659.01,
+        {"最新价": 659.01},
+        None,
+        None,
+    )
 
-    class FakeAk:
-        @staticmethod
-        def stock_zh_a_spot_em():
-            return pd.DataFrame(
-                [
-                    {
-                        "代码": "301308",
-                        "名称": "江波龙",
-                        "最新价": 659.01,
-                        "市盈率-动态": 67.3,
-                    }
-                ]
-            )
-
-        @staticmethod
-        def stock_zh_a_spot():
-            raise AssertionError("secondary spot should not be reached")
-
-        @staticmethod
-        def stock_zh_a_daily(symbol, start_date, end_date, adjust):
-            raise AssertionError("daily fallback should not be reached")
-
-        @staticmethod
-        def stock_financial_analysis_indicator_em(symbol, indicator):
-            return pd.DataFrame([{"EPSJB": 5.0, "TOTALOPERATEREVETZ": 132.7, "XSJLL": 40.1}])
-
-        @staticmethod
-        def stock_individual_info_em(symbol):
-            return pd.DataFrame([{"item": "股票简称", "value": "江波龙"}])
-
-        @staticmethod
-        def stock_profile_cninfo(symbol):
-            return pd.DataFrame([{"A股简称": "江波龙"}])
-
-    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
-
-    assert snapshot.market_cap == 0
-    assert snapshot.pe_ratio == 67.3
-    assert snapshot.quote_source == "akshare-a-spot-em"
+    assert market_cap == 0
 
 
 def test_eastmoney_single_stock_quote_accepts_price_only_to_avoid_slow_list_fallback(monkeypatch):
@@ -483,32 +367,7 @@ def test_a_share_financial_loader_skips_nan_eastmoney_eps():
     assert row["EPSJB"] == 5.0
 
 
-def test_a_share_snapshot_maps_eastmoney_financial_fields():
-    pd = __import__("pandas")
+def test_a_share_pe_ratio_returns_zero_when_missing():
+    pe_ratio = akshare_market._a_share_pe_ratio(100.0, {"最新价": 100.0}, None)
 
-    class FakeAk:
-        @staticmethod
-        def stock_zh_a_spot_em():
-            raise RuntimeError("spot list unavailable")
-
-        @staticmethod
-        def stock_zh_a_spot():
-            raise RuntimeError("sina list unavailable")
-
-        @staticmethod
-        def stock_zh_a_daily(symbol, start_date, end_date, adjust):
-            return pd.DataFrame([{"close": 100.0, "outstanding_share": 10_000.0}])
-
-        @staticmethod
-        def stock_financial_analysis_indicator_em(symbol, indicator):
-            return pd.DataFrame([{"EPSJB": 5.0, "TOTALOPERATEREVETZ": 6.3, "XSJLL": 52.2}])
-
-        @staticmethod
-        def stock_profile_cninfo(symbol):
-            return pd.DataFrame([{"A股简称": "测试公司"}])
-
-    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("600519"))
-
-    assert snapshot.pe_ratio == 20.0
-    assert snapshot.revenue_growth_percent == 6.3
-    assert snapshot.net_margin_percent == 52.2
+    assert pe_ratio == 0

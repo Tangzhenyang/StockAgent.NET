@@ -128,6 +128,61 @@ public sealed class ResearchTaskApiTests
     }
 
     /// <summary>
+    /// Loading step artifacts returns structured details for a user-owned step.
+    /// 读取步骤产物会返回当前用户拥有步骤的结构化详情。
+    /// </summary>
+    [Fact]
+    public async Task GetResearchTaskStepArtifacts_ReturnsOwnedArtifacts()
+    {
+        await using var factory = TestApplicationFactory.Create();
+
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true
+        });
+        await TestApplicationFactory.RegisterAndLoginAsync(client, "research-step-artifacts-user");
+
+        var task = await CreateTaskAsync(client, "700");
+        var stepId = Guid.NewGuid();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
+            db.ResearchSteps.Add(new ResearchStep
+            {
+                Id = stepId,
+                ResearchTaskId = task.Id,
+                StepName = ResearchStage.CollectStructuredData,
+                Status = StepStatus.Succeeded,
+                StartedAt = DateTimeOffset.UtcNow.AddSeconds(-1),
+                CompletedAt = DateTimeOffset.UtcNow
+            });
+            db.ResearchStepArtifacts.Add(new ResearchStepArtifact
+            {
+                ResearchTaskId = task.Id,
+                ResearchStepId = stepId,
+                Stage = ResearchStage.CollectStructuredData,
+                ArtifactType = "market-snapshot",
+                Title = "行情/财务快照",
+                Summary = "腾讯控股，PE 18.4",
+                JsonPayload = """{"companyName":"腾讯控股","peRatio":18.4}"""
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var response = await client.GetAsync($"/api/research-tasks/{task.Id}/steps/{stepId}/artifacts");
+        var responseJson = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, responseJson);
+        using var document = JsonDocument.Parse(responseJson);
+        var artifacts = document.RootElement.EnumerateArray().ToList();
+        artifacts.Should().HaveCount(1);
+        artifacts[0].GetProperty("artifactType").GetString().Should().Be("market-snapshot");
+        artifacts[0].GetProperty("title").GetString().Should().Be("行情/财务快照");
+        artifacts[0].GetProperty("jsonPayload").GetString().Should().Contain("companyName");
+    }
+
+    /// <summary>
     /// Deleting a failed task removes its diagnostic and generated child records.
     /// 删除失败任务会清理其诊断记录和生成的子记录。
     /// </summary>
@@ -159,6 +214,7 @@ public sealed class ResearchTaskApiTests
         var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
         (await db.ResearchTasks.FindAsync(task.Id)).Should().BeNull();
         db.ResearchSteps.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
+        db.ResearchStepArtifacts.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
         db.ResearchReports.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
         db.EvidenceCards.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
         db.DocumentSources.Where(x => x.ResearchTaskId == task.Id).Should().BeEmpty();
@@ -272,11 +328,22 @@ public sealed class ResearchTaskApiTests
 
         var sourceId = Guid.NewGuid();
         var chunkId = Guid.NewGuid();
+        var stepId = Guid.NewGuid();
         db.ResearchSteps.Add(new ResearchStep
         {
+            Id = stepId,
             ResearchTaskId = taskId,
             StepName = ResearchStage.CollectStructuredData,
             Status = StepStatus.Failed
+        });
+        db.ResearchStepArtifacts.Add(new ResearchStepArtifact
+        {
+            ResearchTaskId = taskId,
+            ResearchStepId = stepId,
+            Stage = ResearchStage.CollectStructuredData,
+            ArtifactType = "market-snapshot",
+            Title = "行情快照",
+            JsonPayload = "{}"
         });
         db.DocumentSources.Add(new DocumentSource
         {

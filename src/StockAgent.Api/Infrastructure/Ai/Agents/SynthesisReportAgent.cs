@@ -29,7 +29,11 @@ public sealed class SynthesisReportAgent(
         只能基于 MarketFinancialAgent 和 EvidenceFilingAgent 的输出生成结论。
         不得创造新事实。所有关键结论必须输出到 keyClaims，并绑定 evidenceCardIds。
         如果某个结论无法绑定至少一个 evidenceCardId，不要把它放入 keyClaims。
-        报告使用中文 Markdown，不提供直接买卖建议。
+        报告使用接近券商研报风格的中文 Markdown，不提供直接买卖建议。
+        报告必须尽量具体、细化、可复核，优先使用输入中的数字、事实和引用。
+        在证据充足时，报告正文目标为约 8000 个中文字符；如果证据不足，也要保留完整研报框架并明确写出缺口。
+        报告建议包含：投资摘要、公司概览、行业与竞争格局、行情与估值、财务质量、业务经营、公告与事件解读、关键驱动因素、风险因素、证据不足与无法推断事项、评分评级、后续跟踪指标。
+        对没有证据支撑的内容必须写为待验证假设，不要写成确定结论。
         必须只输出 JSON，字段为 overallScore, riskLevel, valuationView, summary, keyAssumptions, keyClaims, markdown。
         """;
     }

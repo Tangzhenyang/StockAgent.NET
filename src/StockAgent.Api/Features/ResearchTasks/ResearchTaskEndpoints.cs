@@ -146,6 +146,38 @@ public static class ResearchTaskEndpoints
             return Results.Ok(steps);
         });
 
+        group.MapGet("/{id:guid}/steps/{stepId:guid}/artifacts", async (
+            Guid id,
+            Guid stepId,
+            StockAgentDbContext db,
+            ICurrentUser currentUser,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = currentUser.RequireUserId();
+            var ownsStep = await db.ResearchSteps.AnyAsync(
+                x => x.Id == stepId && x.ResearchTaskId == id && x.ResearchTask!.UserId == userId,
+                cancellationToken);
+            if (!ownsStep)
+            {
+                return Results.NotFound();
+            }
+
+            var artifacts = await db.ResearchStepArtifacts
+                .Where(x => x.ResearchTaskId == id && x.ResearchStepId == stepId)
+                .OrderBy(x => x.CreatedAt)
+                .Select(x => new ResearchStepArtifactResponse(
+                    x.Id,
+                    x.Stage,
+                    x.ArtifactType,
+                    x.Title,
+                    x.Summary,
+                    x.JsonPayload,
+                    x.CreatedAt))
+                .ToListAsync(cancellationToken);
+
+            return Results.Ok(artifacts);
+        });
+
         group.MapDelete("/{id:guid}", async (
             Guid id,
             StockAgentDbContext db,
@@ -188,6 +220,9 @@ public static class ResearchTaskEndpoints
             var steps = await db.ResearchSteps
                 .Where(x => x.ResearchTaskId == id)
                 .ToListAsync(cancellationToken);
+            var artifacts = await db.ResearchStepArtifacts
+                .Where(x => x.ResearchTaskId == id)
+                .ToListAsync(cancellationToken);
 
             db.DocumentChunks.RemoveRange(chunks);
             db.EvidenceCards.RemoveRange(evidenceCards);
@@ -195,6 +230,7 @@ public static class ResearchTaskEndpoints
             db.ResearchReports.RemoveRange(reports);
             db.PdfExports.RemoveRange(pdfExports);
             db.ModelInvocations.RemoveRange(invocations);
+            db.ResearchStepArtifacts.RemoveRange(artifacts);
             db.ResearchSteps.RemoveRange(steps);
             db.ResearchTasks.Remove(task);
             await db.SaveChangesAsync(cancellationToken);

@@ -146,7 +146,9 @@ export function ResearchWorkbench() {
       </aside>
       <section className="content">
         {selectedTask && <TaskTimeline status={selectedTask.status} />}
-        {selectedTask && <TaskStepDetails steps={stepQuery.data ?? []} isLoading={stepQuery.isFetching} />}
+        {selectedTask && (
+          <TaskStepDetails taskId={selectedTask.id} steps={stepQuery.data ?? []} isLoading={stepQuery.isFetching} />
+        )}
         <div className="workspaceGrid">
           <ReportViewer
             report={reportQuery.data}

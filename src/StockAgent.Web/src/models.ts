@@ -59,6 +59,19 @@ export interface ResearchStep {
 }
 
 /**
+ * Structured artifact captured for one research pipeline step.
+ */
+export interface ResearchStepArtifact {
+  id: string;
+  stage: ResearchStep['stepName'];
+  artifactType: string;
+  title: string;
+  summary?: string;
+  jsonPayload: string;
+  createdAt: string;
+}
+
+/**
  * Report payload rendered by the report viewer.
  */
 export interface ResearchReport {

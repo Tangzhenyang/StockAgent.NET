@@ -1,4 +1,7 @@
-import type { ResearchStep } from '../models';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { listResearchStepArtifacts } from '../api/researchApi';
+import type { ResearchStep, ResearchStepArtifact } from '../models';
 
 const stageLabels: Record<ResearchStep['stepName'], string> = {
   NormalizeTicker: '规范股票代码',
@@ -22,7 +25,15 @@ const statusLabels: Record<ResearchStep['status'], string> = {
 /**
  * Shows durable task execution diagnostics for the selected research task.
  */
-export function TaskStepDetails({ steps, isLoading }: { steps: ResearchStep[]; isLoading: boolean }) {
+export function TaskStepDetails({ taskId, steps, isLoading }: { taskId: string; steps: ResearchStep[]; isLoading: boolean }) {
+  const [expandedStepId, setExpandedStepId] = useState<string>();
+  const artifactQuery = useQuery({
+    queryKey: ['researchStepArtifacts', taskId, expandedStepId],
+    queryFn: () => listResearchStepArtifacts(taskId, expandedStepId!),
+    enabled: Boolean(expandedStepId),
+    retry: false,
+  });
+
   return (
     <section className="stepDetails" aria-label="执行明细">
       <div className="stepDetailsHeader">
@@ -33,26 +44,219 @@ export function TaskStepDetails({ steps, isLoading }: { steps: ResearchStep[]; i
         <p className="stepEmpty">暂无执行记录</p>
       ) : (
         <ol className="stepList">
-          {steps.map((step) => (
-            <li key={step.id} className={`stepRow ${step.status.toLowerCase()}`}>
-              <div className="stepMain">
-                <strong>{stageLabels[step.stepName]}</strong>
-                <span>{statusLabels[step.status]}</span>
-                <time>{formatTime(step.startedAt)}</time>
-                <span>{formatDuration(step.durationMs)}</span>
-              </div>
-              <div className="stepSummary">
-                {step.inputSummary && <p>输入：{step.inputSummary}</p>}
-                {step.outputSummary && <p>输出：{step.outputSummary}</p>}
-                {step.errorMessage && <p className="stepError">错误：{step.errorMessage}</p>}
-                {step.isLongRunning && <p className="stepWarning">运行时间较长，可能是外部数据源或大模型响应较慢。</p>}
-              </div>
-            </li>
-          ))}
+          {steps.map((step) => {
+            const expanded = expandedStepId === step.id;
+            return (
+              <li key={step.id} className={`stepRow ${step.status.toLowerCase()}`}>
+                <button
+                  type="button"
+                  className="stepToggle"
+                  aria-expanded={expanded}
+                  onClick={() => setExpandedStepId(expanded ? undefined : step.id)}
+                >
+                  <div className="stepMain">
+                    <strong>{stageLabels[step.stepName]}</strong>
+                    <span>{statusLabels[step.status]}</span>
+                    <time>{formatTime(step.startedAt)}</time>
+                    <span>{formatDuration(step.durationMs)}</span>
+                  </div>
+                  <span className="stepToggleHint">{expanded ? '收起' : '查看详情'}</span>
+                </button>
+                <div className="stepSummary">
+                  {step.inputSummary && <p>输入：{step.inputSummary}</p>}
+                  {step.outputSummary && <p>输出：{step.outputSummary}</p>}
+                  {step.errorMessage && <p className="stepError">错误：{step.errorMessage}</p>}
+                  {step.isLongRunning && <p className="stepWarning">运行时间较长，可能是外部数据源或大模型响应较慢。</p>}
+                </div>
+                {expanded && (
+                  <StepArtifacts
+                    artifacts={artifactQuery.data ?? []}
+                    isLoading={artifactQuery.isFetching}
+                    isError={artifactQuery.isError}
+                  />
+                )}
+              </li>
+            );
+          })}
         </ol>
       )}
     </section>
   );
+}
+
+function StepArtifacts({
+  artifacts,
+  isLoading,
+  isError,
+}: {
+  artifacts: ResearchStepArtifact[];
+  isLoading: boolean;
+  isError: boolean;
+}) {
+  if (isLoading) {
+    return <p className="stepArtifactEmpty">正在加载阶段详情...</p>;
+  }
+
+  if (isError) {
+    return <p className="stepArtifactEmpty error">阶段详情加载失败。</p>;
+  }
+
+  if (artifacts.length === 0) {
+    return <p className="stepArtifactEmpty">暂无阶段详情，旧任务可能没有记录结构化产物。</p>;
+  }
+
+  return (
+    <div className="stepArtifacts">
+      {artifacts.map((artifact) => (
+        <article key={artifact.id} className="stepArtifact">
+          <header>
+            <strong>{artifact.title}</strong>
+            <span>{artifact.summary}</span>
+          </header>
+          <ArtifactPayload artifact={artifact} />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ArtifactPayload({ artifact }: { artifact: ResearchStepArtifact }) {
+  const payload = parsePayload(artifact.jsonPayload);
+  if (artifact.artifactType === 'market-snapshot' && isRecord(payload)) {
+    return <KeyValueGrid value={payload} />;
+  }
+
+  if (artifact.artifactType === 'source-documents' && Array.isArray(payload)) {
+    return (
+      <ul className="artifactList">
+        {payload.map((source, index) => {
+          const item = toRecord(source);
+          return (
+            <li key={index}>
+              <strong>{String(item.title ?? item.Title ?? '未命名来源')}</strong>
+              {renderUrl(item.url ?? item.Url)}
+              <span>{String(item.sourceType ?? item.SourceType ?? '未知来源类型')}</span>
+              <span>{formatOptionalDate(item.publishedAt ?? item.PublishedAt)}</span>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
+  if (artifact.artifactType === 'ingested-evidence' && Array.isArray(payload)) {
+    return (
+      <ul className="artifactList">
+        {payload.map((source, index) => {
+          const item = toRecord(source);
+          return (
+            <li key={index}>
+              <strong>{String(item.title ?? item.Title ?? '源文档')}</strong>
+              {renderUrl(item.url ?? item.Url)}
+              <span>Chunk：{String(item.chunkCount ?? item.ChunkCount ?? 0)}</span>
+              <NestedEvidenceList cards={toArray(item.evidenceCards ?? item.EvidenceCards)} />
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
+  if (artifact.artifactType === 'agent-analysis' && isRecord(payload)) {
+    return (
+      <div className="artifactStack">
+        <KeyValueGrid
+          value={{
+            overallScore: payload.overallScore,
+            riskLevel: payload.riskLevel,
+            valuationView: payload.valuationView,
+            summary: payload.summary,
+          }}
+        />
+        <NestedEvidenceList cards={toArray(payload.modelInvocations ?? payload.ModelInvocations)} title="模型调用" />
+      </div>
+    );
+  }
+
+  return <pre className="artifactJson">{artifact.jsonPayload}</pre>;
+}
+
+function KeyValueGrid({ value }: { value: Record<string, unknown> }) {
+  return (
+    <dl className="artifactGrid">
+      {Object.entries(value).map(([key, entry]) => (
+        <div key={key}>
+          <dt>{key}</dt>
+          <dd>{formatValue(entry)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function NestedEvidenceList({ cards, title = '证据卡' }: { cards: unknown[]; title?: string }) {
+  if (!Array.isArray(cards) || cards.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="nestedArtifactList">
+      <span>{title}</span>
+      <ul>
+        {cards.map((card, index) => (
+          <li key={index}>{formatValue(card)}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function parsePayload(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function toArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function renderUrl(value: unknown) {
+  if (typeof value !== 'string' || value.length === 0) {
+    return null;
+  }
+
+  return (
+    <a href={value} target="_blank" rel="noreferrer">
+      {value}
+    </a>
+  );
+}
+
+function formatOptionalDate(value: unknown) {
+  return typeof value === 'string' && value.length > 0 ? new Date(value).toLocaleString('zh-CN') : '发布时间未知';
+}
+
+function formatValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '-';
+  }
+
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
 }
 
 function formatTime(value?: string) {

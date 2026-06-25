@@ -1,3 +1,10 @@
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -28,6 +35,7 @@ a {
   min-height: 100vh;
   display: grid;
   grid-template-rows: 58px minmax(0, 1fr);
+  min-width: 0;
 }
 
 .appHeader {
@@ -174,6 +182,7 @@ a {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
   min-height: calc(100vh - 58px);
+  min-width: 0;
 }
 
 .sidebar {
@@ -255,6 +264,7 @@ a {
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 18px;
   padding: 20px;
+  min-width: 0;
 }
 
 .timeline {
@@ -350,9 +360,10 @@ a {
 
 .workspaceGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
   gap: 16px;
   min-height: 0;
+  min-width: 0;
 }
 
 .reportViewer,
@@ -370,6 +381,7 @@ a {
   display: grid;
   gap: 10px;
   padding: 14px 16px;
+  min-width: 0;
 }
 
 .stepDetailsHeader,
@@ -413,6 +425,7 @@ a {
   gap: 6px;
   border-left: 3px solid #c8d2df;
   padding: 8px 0 8px 10px;
+  min-width: 0;
 }
 
 .stepRow.running {
@@ -429,6 +442,7 @@ a {
 
 .stepMain {
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .stepMain strong {
@@ -438,6 +452,7 @@ a {
 .stepSummary {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .stepSummary p {
@@ -445,6 +460,7 @@ a {
   color: #4f5d6b;
   font-size: 13px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .stepSummary .stepError {
@@ -453,6 +469,120 @@ a {
 
 .stepSummary .stepWarning {
   color: #a15c00;
+}
+
+.stepToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.stepToggleHint {
+  flex: 0 0 auto;
+  color: #1769aa;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.stepArtifacts,
+.artifactStack {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.stepArtifact {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e4e9f0;
+  border-radius: 6px;
+  padding: 10px;
+  background: #fbfcfe;
+  min-width: 0;
+}
+
+.stepArtifact header,
+.artifactList li,
+.nestedArtifactList {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.stepArtifact header span,
+.artifactList span,
+.artifactList a,
+.nestedArtifactList,
+.artifactJson,
+.artifactGrid dd {
+  color: #5d6b7a;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.artifactList {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.artifactList li {
+  border-left: 3px solid #7aa8c9;
+  padding-left: 10px;
+}
+
+.artifactGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+.artifactGrid div {
+  min-width: 0;
+}
+
+.artifactGrid dt {
+  color: #4f5d6b;
+  font-size: 12px;
+}
+
+.artifactGrid dd {
+  margin: 2px 0 0;
+}
+
+.nestedArtifactList ul {
+  display: grid;
+  gap: 4px;
+  padding-left: 16px;
+  margin: 4px 0 0;
+}
+
+.artifactJson {
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.stepArtifactEmpty {
+  margin: 0;
+  color: #5d6b7a;
+  font-size: 13px;
+}
+
+.stepArtifactEmpty.error {
+  color: #b42318;
 }
 
 .emptyState {
@@ -486,6 +616,7 @@ a {
 .reportViewer article {
   padding: 18px;
   line-height: 1.7;
+  overflow-wrap: anywhere;
 }
 
 .reportFeedback {
@@ -504,12 +635,17 @@ a {
   display: grid;
   align-content: start;
   gap: 16px;
+  min-width: 0;
 }
 
 .evidencePanel,
 .settingsPanel,
 .historyList {
   padding: 16px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .evidencePanel ul,
@@ -526,11 +662,18 @@ a {
   gap: 4px;
   border-left: 3px solid #2e7d59;
   padding-left: 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .evidencePanel span,
 .muted {
   color: #5d6b7a;
+  overflow-wrap: anywhere;
+}
+
+.evidencePanel strong {
+  overflow-wrap: anywhere;
 }
 
 .historyPage {
@@ -557,7 +700,7 @@ a {
 
 .historyContent {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
   gap: 16px;
   min-width: 0;
 }

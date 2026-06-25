@@ -1,4 +1,11 @@
-import type { EvidenceCard, PdfExportResponse, ResearchReport, ResearchStep, ResearchTask } from '../models';
+import type {
+  EvidenceCard,
+  PdfExportResponse,
+  ResearchReport,
+  ResearchStep,
+  ResearchStepArtifact,
+  ResearchTask,
+} from '../models';
 
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000';
 
@@ -86,6 +93,20 @@ export async function listResearchTaskSteps(taskId: string): Promise<ResearchSte
   });
   if (!response.ok) {
     throw new Error(`List research task steps failed with ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Loads structured diagnostic artifacts for one execution step.
+ */
+export async function listResearchStepArtifacts(taskId: string, stepId: string): Promise<ResearchStepArtifact[]> {
+  const response = await fetch(`${apiBaseUrl}/api/research-tasks/${taskId}/steps/${stepId}/artifacts`, {
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    throw new Error(`List research step artifacts failed with ${response.status}`);
   }
 
   return response.json();

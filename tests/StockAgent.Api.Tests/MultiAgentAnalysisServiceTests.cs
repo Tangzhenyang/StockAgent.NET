@@ -286,6 +286,48 @@ public sealed class MultiAgentAnalysisServiceTests
     }
 
     /// <summary>
+    /// Review failures are converted into a limited report instead of failing analysis.
+    /// 审核失败会转换为受限报告，而不是让分析失败。
+    /// </summary>
+    [Fact]
+    public async Task SemanticKernelResearchAnalysisService_ReturnsLimitedReportWhenReviewFails()
+    {
+        await using var factory = TestApplicationFactory.Create();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<StockAgentDbContext>();
+        var client = new SequenceModelChatClient(
+            """
+            {"score":70,"valuationView":"估值偏高","strengths":["净利率高"],"risks":["PE 偏高"],"followUpQuestions":[]}
+            """,
+            """
+            {"positiveFacts":["年度报告已披露"],"negativeFacts":[],"uncertainties":["毛利率持续性需要验证"],"citations":[]}
+            """,
+            """
+            {"overallScore":62,"riskLevel":"较高","valuationView":"需要更多证据验证","summary":"摘要","keyAssumptions":["未来三年增长延续"],"keyClaims":[],"markdown":"# 研报草稿\n\n## 核心结论\n增长延续。"}
+            """,
+            """
+            {"approved":false,"issues":["关键假设缺少证据支撑","部分结论无法从现有公告推断"],"revisionInstruction":"补充证据不足说明"}
+            """);
+        var service = new SemanticKernelResearchAnalysisService(
+            client,
+            new AgentContextBudgeter(new AgentContextBudgetOptions()),
+            db,
+            NullLogger<SemanticKernelResearchAnalysisService>.Instance);
+
+        var result = await service.AnalyzeAsync(
+            Guid.NewGuid(),
+            CreateSnapshot(),
+            [],
+            new ModelRuntimeSettings("OpenAICompatible", "https://example.test/v1", "test-model", "test-key"),
+            "zh-CN",
+            CancellationToken.None);
+
+        result.ReportMarkdown.Should().Contain("证据不足与无法推断事项");
+        result.ReportMarkdown.Should().Contain("关键假设缺少证据支撑");
+        result.AgentTraces.Should().Contain("ReviewAgent:LimitedReport");
+    }
+
+    /// <summary>
     /// Fixed-flow analysis writes one model invocation record per agent.
     /// 固定流程分析会为每个 Agent 写入一条模型调用记录。
     /// </summary>

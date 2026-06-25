@@ -14,6 +14,8 @@ public sealed class StockAgentDbContext(DbContextOptions<StockAgentDbContext> op
     public DbSet<ResearchTask> ResearchTasks => Set<ResearchTask>();
     /// <summary>Research stage audit records. 研究阶段审计记录。</summary>
     public DbSet<ResearchStep> ResearchSteps => Set<ResearchStep>();
+    /// <summary>Structured step artifacts for expandable diagnostics. 用于可展开诊断的结构化步骤产物。</summary>
+    public DbSet<ResearchStepArtifact> ResearchStepArtifacts => Set<ResearchStepArtifact>();
     /// <summary>Collected source documents. 收集到的源文档。</summary>
     public DbSet<DocumentSource> DocumentSources => Set<DocumentSource>();
     /// <summary>Parsed document chunks. 解析后的文档块。</summary>
@@ -60,6 +62,16 @@ public sealed class StockAgentDbContext(DbContextOptions<StockAgentDbContext> op
             entity.Property(x => x.InputSummary).HasMaxLength(2000);
             entity.Property(x => x.OutputSummary).HasMaxLength(2000);
             entity.Property(x => x.ErrorMessage).HasMaxLength(4000);
+        });
+
+        modelBuilder.Entity<ResearchStepArtifact>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ArtifactType).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.Title).HasMaxLength(256).IsRequired();
+            entity.Property(x => x.Summary).HasMaxLength(1000);
+            entity.Property(x => x.JsonPayload).IsRequired();
+            entity.HasIndex(x => new { x.ResearchTaskId, x.ResearchStepId });
         });
 
         modelBuilder.Entity<DocumentSource>(entity =>

@@ -60,3 +60,23 @@ public sealed record ResearchStepResponse(
     string? OutputSummary,
     string? ErrorMessage,
     bool IsLongRunning);
+
+/// <summary>
+/// Structured artifact response for one research pipeline step.
+/// 单个研究流水线步骤的结构化产物响应。
+/// </summary>
+/// <param name="Id">Artifact identifier. 产物标识符。</param>
+/// <param name="Stage">Pipeline stage that produced the artifact. 生成产物的流水线阶段。</param>
+/// <param name="ArtifactType">Machine-readable artifact category. 机器可读的产物类别。</param>
+/// <param name="Title">Human-readable title. 人类可读标题。</param>
+/// <param name="Summary">Short display summary. 展示用简短摘要。</param>
+/// <param name="JsonPayload">Sanitized JSON payload. 脱敏后的 JSON 载荷。</param>
+/// <param name="CreatedAt">UTC creation timestamp. UTC 创建时间戳。</param>
+public sealed record ResearchStepArtifactResponse(
+    Guid Id,
+    ResearchStage Stage,
+    string ArtifactType,
+    string Title,
+    string? Summary,
+    string JsonPayload,
+    DateTimeOffset CreatedAt);

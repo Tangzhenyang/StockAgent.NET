@@ -27,6 +27,11 @@ public sealed class ResearchOrchestrator(
     UserSettingsService userSettingsService,
     ILogger<ResearchOrchestrator> logger)
 {
+    private static readonly JsonSerializerOptions ArtifactJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true
+    };
+
     /// <summary>
     /// Executes the first runnable research pipeline for one queued task.
     /// 为一个已入队任务执行首个可运行的研究流水线。
@@ -45,7 +50,14 @@ public sealed class ResearchOrchestrator(
                 "请求行情/财务数据源",
                 token => marketDataProvider.GetSnapshotAsync(task.Ticker, dataSourceSettings, token),
                 result => $"行情/财务数据源完成：{result.CompanyName}，PE {result.PeRatio:N1}，净利率 {result.NetMarginPercent:N1}%",
-                cancellationToken);
+                cancellationToken,
+                (result, step, token) => SaveStepArtifactAsync(
+                    step,
+                    "market-snapshot",
+                    "行情/财务快照",
+                    $"{result.CompanyName}，最新价 {result.LastPrice:N2}，PE {result.PeRatio:N1}",
+                    result,
+                    token));
             task.CompanyName = snapshot.CompanyName;
 
             await UpdateTaskStatusAsync(task, ResearchTaskStatus.CollectingData, ResearchStage.CollectPublicEvidence, 30, cancellationToken);
@@ -59,7 +71,21 @@ public sealed class ResearchOrchestrator(
                     dataSourceSettings,
                     token),
                 result => $"获取到 {result.Count} 条证据文档",
-                cancellationToken);
+                cancellationToken,
+                (result, step, token) => SaveStepArtifactAsync(
+                    step,
+                    "source-documents",
+                    "公告/证据源列表",
+                    $"获取到 {result.Count} 条源文档",
+                    result.Select(x => new
+                    {
+                        x.Title,
+                        x.Url,
+                        x.SourceType,
+                        x.PublishedAt,
+                        TextLength = x.Text.Length
+                    }).ToList(),
+                    token));
 
             logger.LogInformation("Collected {DocumentCount} evidence documents for {Ticker}", documents.Count, task.Ticker);
 
@@ -70,7 +96,8 @@ public sealed class ResearchOrchestrator(
                 $"解析 {documents.Count} 条文档并生成证据卡片",
                 token => IngestDocumentsAsync(task, documents, token),
                 result => $"生成 {result.Count} 张证据卡片",
-                cancellationToken);
+                cancellationToken,
+                (result, step, token) => SaveIngestionArtifactAsync(task.Id, step, result, token));
 
             await UpdateTaskStatusAsync(task, ResearchTaskStatus.Analyzing, ResearchStage.AnalyzeWithSemanticKernel, 75, cancellationToken);
             var researchSettings = await userSettingsService.GetResearchSettingsAsync(task.UserId, cancellationToken);
@@ -88,7 +115,8 @@ public sealed class ResearchOrchestrator(
                     task.Language,
                     token),
                 result => $"多 Agent 分析完成：{string.Join("，", result.AgentTraces ?? [])}",
-                cancellationToken);
+                cancellationToken,
+                (result, step, token) => SaveAnalysisArtifactAsync(task.Id, step, result, token));
 
             await UpdateTaskStatusAsync(task, ResearchTaskStatus.GeneratingReport, ResearchStage.GenerateReport, 90, cancellationToken);
             await RunStepAsync(
@@ -110,7 +138,14 @@ public sealed class ResearchOrchestrator(
                     return Task.FromResult(generatedReport.Score.OverallScore);
                 },
                 score => $"报告生成完成：综合评分 {score}",
-                cancellationToken);
+                cancellationToken,
+                (score, step, token) => SaveStepArtifactAsync(
+                    step,
+                    "generated-report",
+                    "报告生成结果",
+                    $"综合评分 {score}",
+                    new { OverallScore = score, task.Language },
+                    token));
             await db.SaveChangesAsync(cancellationToken);
 
             await UpdateTaskStatusAsync(task, ResearchTaskStatus.Ready, ResearchStage.GenerateReport, 100, cancellationToken);
@@ -190,7 +225,8 @@ public sealed class ResearchOrchestrator(
         string inputSummary,
         Func<CancellationToken, Task<T>> action,
         Func<T, string> outputSummaryFactory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<T, ResearchStep, CancellationToken, Task>? artifactWriter = null)
     {
         var step = new ResearchStep
         {
@@ -209,6 +245,11 @@ public sealed class ResearchOrchestrator(
             step.Status = StepStatus.Succeeded;
             step.CompletedAt = DateTimeOffset.UtcNow;
             step.OutputSummary = Truncate(outputSummaryFactory(result), 2000);
+            if (artifactWriter is not null)
+            {
+                await artifactWriter(result, step, cancellationToken);
+            }
+
             await db.SaveChangesAsync(cancellationToken);
             return result;
         }
@@ -248,6 +289,112 @@ public sealed class ResearchOrchestrator(
         task.ErrorMessage = Truncate(exception.Message, 4000);
         task.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken.IsCancellationRequested ? CancellationToken.None : cancellationToken);
+    }
+
+    private Task SaveStepArtifactAsync(
+        ResearchStep step,
+        string artifactType,
+        string title,
+        string summary,
+        object payload,
+        CancellationToken cancellationToken)
+    {
+        db.ResearchStepArtifacts.Add(new ResearchStepArtifact
+        {
+            ResearchTaskId = step.ResearchTaskId,
+            ResearchStepId = step.Id,
+            Stage = step.StepName,
+            ArtifactType = artifactType,
+            Title = title,
+            Summary = Truncate(summary, 1000),
+            JsonPayload = JsonSerializer.Serialize(payload, ArtifactJsonOptions)
+        });
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveIngestionArtifactAsync(
+        Guid researchTaskId,
+        ResearchStep step,
+        IReadOnlyList<EvidenceCard> evidenceCards,
+        CancellationToken cancellationToken)
+    {
+        var sourceIds = evidenceCards.Select(x => x.DocumentSourceId).Distinct().ToList();
+        var sources = await db.DocumentSources
+            .Where(x => x.ResearchTaskId == researchTaskId && sourceIds.Contains(x.Id))
+            .ToListAsync(cancellationToken);
+        var chunks = await db.DocumentChunks
+            .Where(x => sourceIds.Contains(x.DocumentSourceId))
+            .ToListAsync(cancellationToken);
+        var payload = sources.Select(source => new
+        {
+            source.Id,
+            source.Title,
+            source.Url,
+            source.SourceType,
+            source.PublishedAt,
+            ChunkCount = chunks.Count(x => x.DocumentSourceId == source.Id),
+            EvidenceCards = evidenceCards
+                .Where(x => x.DocumentSourceId == source.Id)
+                .Select(x => new
+                {
+                    x.Id,
+                    x.Claim,
+                    x.Snippet,
+                    x.Confidence,
+                    x.Relevance,
+                    x.ReportSection,
+                    x.SourceDate
+                })
+                .ToList()
+        }).ToList();
+
+        await SaveStepArtifactAsync(
+            step,
+            "ingested-evidence",
+            "文档入库与证据卡",
+            $"入库 {sources.Count} 个源文档，生成 {evidenceCards.Count} 张证据卡片",
+            payload,
+            cancellationToken);
+    }
+
+    private async Task SaveAnalysisArtifactAsync(
+        Guid researchTaskId,
+        ResearchStep step,
+        AiAnalysisResult analysis,
+        CancellationToken cancellationToken)
+    {
+        var invocations = await db.ModelInvocations
+            .Where(x => x.ResearchTaskId == researchTaskId)
+            .OrderBy(x => x.CreatedAt)
+            .Select(x => new
+            {
+                x.StepName,
+                x.Provider,
+                x.ModelName,
+                x.DurationMs,
+                x.Status,
+                x.ErrorMessage,
+                x.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+        var payload = new
+        {
+            analysis.OverallScore,
+            analysis.RiskLevel,
+            analysis.ValuationView,
+            analysis.Summary,
+            analysis.KeyAssumptions,
+            analysis.AgentTraces,
+            ModelInvocations = invocations
+        };
+
+        await SaveStepArtifactAsync(
+            step,
+            "agent-analysis",
+            "多 Agent 分析详情",
+            $"评分 {analysis.OverallScore}，风险 {analysis.RiskLevel}",
+            payload,
+            cancellationToken);
     }
 
     private static string Truncate(string value, int maxLength)

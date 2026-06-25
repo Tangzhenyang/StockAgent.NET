@@ -66,7 +66,23 @@ public sealed class SemanticKernelResearchAnalysisService(
 
         if (!reviewRun.Output.Approved)
         {
-            throw new InvalidOperationException($"Report review failed: {string.Join("; ", reviewRun.Output.Issues)}");
+            var limitedMarkdown = BuildLimitedReportMarkdown(synthesisOutput, reviewRun.Output, evidenceOutput);
+            return new AiAnalysisResult(
+                synthesisOutput.OverallScore,
+                synthesisOutput.RiskLevel,
+                synthesisOutput.ValuationView,
+                synthesisOutput.Summary,
+                [
+                    ..synthesisOutput.KeyAssumptions,
+                    ..reviewRun.Output.Issues.Select(x => $"待验证：{x}")
+                ],
+                limitedMarkdown,
+                [
+                    "MarketFinancialAgent:Succeeded",
+                    "EvidenceFilingAgent:Succeeded",
+                    "SynthesisReportAgent:Succeeded",
+                    "ReviewAgent:LimitedReport"
+                ]);
         }
 
         return new AiAnalysisResult(
@@ -116,6 +132,48 @@ public sealed class SemanticKernelResearchAnalysisService(
             .ToList();
 
         return output with { KeyClaims = keyClaims };
+    }
+
+    private static string BuildLimitedReportMarkdown(
+        SynthesisReportAgentOutput synthesisOutput,
+        ReviewAgentOutput reviewOutput,
+        EvidenceFilingAgentOutput evidenceOutput)
+    {
+        var issues = reviewOutput.Issues.Count == 0
+            ? "- 审核 Agent 未返回具体问题，但未批准该报告。"
+            : string.Join(Environment.NewLine, reviewOutput.Issues.Select(x => $"- {x}"));
+        var assumptions = synthesisOutput.KeyAssumptions.Count == 0
+            ? "- 暂无可确认的关键假设。"
+            : string.Join(Environment.NewLine, synthesisOutput.KeyAssumptions.Select(x => $"- {x}"));
+        var citations = evidenceOutput.Citations.Count == 0
+            ? "- 当前没有可绑定到报告结论的有效证据引用。"
+            : string.Join(Environment.NewLine, evidenceOutput.Citations.Select(x => $"- {x.Title}：{x.Snippet}"));
+
+        return $"""
+        {synthesisOutput.Markdown}
+
+        ## 证据不足与无法推断事项
+
+        本报告已生成为受限研究报告：系统保留已有行情、财务和公开证据分析，但最终审核发现部分结论仍缺少充分证据支撑。因此，下列内容不应被视为已被公告、财务数据或公开证据完全验证。
+
+        ### 审核发现的问题
+
+        {issues}
+
+        ### 需要继续验证的关键假设
+
+        {assumptions}
+
+        ### 当前可用证据边界
+
+        {citations}
+
+        ### 使用限制
+
+        - 对缺少明确公告、财务明细或来源引用的判断，仅作为研究假设。
+        - 后续应优先补充公告原文、定期报告、业绩说明材料及可复核财务数据。
+        - 本报告仅用于研究辅助，不构成买卖建议。
+        """;
     }
 
     private static async Task<AgentRunResult<TOutput>> RunMeasuredAsync<TInput, TOutput>(

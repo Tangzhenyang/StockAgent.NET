@@ -198,6 +198,81 @@ def test_a_share_snapshot_prefers_single_stock_realtime_over_daily_close(monkeyp
     assert snapshot.price_freshness == "intraday-delayed"
 
 
+def test_a_share_snapshot_skips_incomplete_single_stock_realtime(monkeypatch):
+    pd = __import__("pandas")
+
+    def fake_incomplete_eastmoney_realtime(normalized):
+        return None
+
+    monkeypatch.setattr(
+        akshare_market,
+        "_load_a_share_eastmoney_quote_row",
+        fake_incomplete_eastmoney_realtime,
+        raising=False,
+    )
+
+    class FakeAk:
+        @staticmethod
+        def stock_zh_a_spot_em():
+            return pd.DataFrame(
+                [
+                    {
+                        "代码": "301308",
+                        "名称": "江波龙",
+                        "最新价": 659.01,
+                        "总市值": 278_800_000_000,
+                        "市盈率-动态": 67.3,
+                    }
+                ]
+            )
+
+        @staticmethod
+        def stock_zh_a_spot():
+            raise AssertionError("secondary spot should not be reached")
+
+        @staticmethod
+        def stock_zh_a_daily(symbol, start_date, end_date, adjust):
+            raise AssertionError("daily fallback should not be reached")
+
+        @staticmethod
+        def stock_financial_analysis_indicator_em(symbol, indicator):
+            return pd.DataFrame([{"EPSJB": 5.0, "TOTALOPERATEREVETZ": 132.7, "XSJLL": 40.1}])
+
+        @staticmethod
+        def stock_profile_cninfo(symbol):
+            return pd.DataFrame([{"A股简称": "江波龙"}])
+
+    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
+
+    assert snapshot.last_price == 659.01
+    assert snapshot.quote_source == "akshare-a-spot-em"
+
+
+def test_eastmoney_single_stock_quote_requires_complete_core_fields(monkeypatch):
+    class FakeResponse:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "data": {
+                    "f43": 65901,
+                    "f57": "301308",
+                    "f58": "江波龙",
+                    "f116": "-",
+                    "f162": "-",
+                }
+            }
+
+    monkeypatch.setattr(akshare_market.httpx, "get", lambda *args, **kwargs: FakeResponse())
+
+    row = akshare_market._load_a_share_eastmoney_quote_row(normalize_ticker("301308"))
+
+    assert row is None
+
+
 def test_find_first_row_matches_prefixed_and_suffixed_a_share_codes():
     pd = __import__("pandas")
     frame = pd.DataFrame(

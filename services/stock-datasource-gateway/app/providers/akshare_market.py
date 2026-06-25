@@ -223,13 +223,17 @@ def _load_a_share_eastmoney_quote_row(normalized: NormalizedTicker) -> dict[str,
     latest_price = _eastmoney_scaled_number(data.get("f43"))
     if latest_price == 0:
         return None
+    market_cap = _eastmoney_plain_number(data.get("f116"))
+    pe_ratio = _eastmoney_scaled_number(data.get("f162"))
+    if market_cap == 0 or pe_ratio == 0:
+        return None
 
     return {
         "代码": str(data.get("f57") or normalized.ticker),
         "名称": str(data.get("f58") or "A股公司"),
         "最新价": latest_price,
-        "总市值": _eastmoney_plain_number(data.get("f116")),
-        "市盈率-动态": _eastmoney_scaled_number(data.get("f162")),
+        "总市值": market_cap,
+        "市盈率-动态": pe_ratio,
         "_quote_source": "eastmoney-push2-stock-get",
         "_price_freshness": "intraday-delayed",
     }

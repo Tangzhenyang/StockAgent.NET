@@ -103,6 +103,40 @@ public sealed class ConfigurableDataSourceProviderTests
     }
 
     /// <summary>
+    /// Custom HTTP market data providers preserve upstream error payloads for troubleshooting.
+    /// 自定义 HTTP 行情数据源会保留上游错误载荷，便于排查。
+    /// </summary>
+    [Fact]
+    public async Task ConfiguredMarketDataProvider_IncludesProviderErrorBodyWhenRequestFails()
+    {
+        var httpClient = new HttpClient(new StubHttpMessageHandler(_ =>
+        {
+            var json = """
+                {
+                  "error": "Required market field peRatio was not available from real providers.",
+                  "provider": "akshare-market",
+                  "retryable": true
+                }
+                """;
+            return new HttpResponseMessage(HttpStatusCode.BadGateway)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+        }));
+        var provider = new ConfiguredMarketDataProvider(
+            httpClient,
+            new FakeMarketDataProvider(),
+            NullLogger<ConfiguredMarketDataProvider>.Instance);
+        var settings = CreateRuntimeSettings(marketBaseUrl: "http://datasource:8000", marketApiKey: "market-key");
+
+        var action = async () => await provider.GetSnapshotAsync("301308", settings, CancellationToken.None);
+
+        await action.Should()
+            .ThrowAsync<HttpRequestException>()
+            .WithMessage("*502*akshare-market*peRatio*");
+    }
+
+    /// <summary>
     /// Custom HTTP web research providers expose a stable wrapper contract for announcement/search services.
     /// 自定义 HTTP 网页研究提供器为公告/搜索服务暴露稳定包装契约。
     /// </summary>

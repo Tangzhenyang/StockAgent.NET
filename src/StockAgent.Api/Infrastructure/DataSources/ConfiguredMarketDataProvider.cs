@@ -36,7 +36,7 @@ public sealed class ConfiguredMarketDataProvider(
 
         logger.LogInformation("Fetching market snapshot for {Ticker} from configured HTTP data source.", ticker);
         using var response = await httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithProviderBodyAsync(response, cancellationToken);
 
         var snapshot = await response.Content.ReadFromJsonAsync<MarketDataSnapshot>(JsonOptions, cancellationToken);
         return snapshot ?? throw new InvalidOperationException("Market data provider returned an empty response.");
@@ -68,6 +68,51 @@ public sealed class ConfiguredMarketDataProvider(
         builder.Query = string.Join("&", query.Select(x =>
             $"{Uri.EscapeDataString(x.Key)}={Uri.EscapeDataString(x.Value)}"));
         return builder.Uri;
+    }
+
+    private static async Task EnsureSuccessWithProviderBodyAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        var detail = string.IsNullOrWhiteSpace(body) ? response.ReasonPhrase : SummarizeProviderError(body);
+        throw new HttpRequestException(
+            $"Market data provider returned {(int)response.StatusCode} ({response.ReasonPhrase}). {detail}",
+            null,
+            response.StatusCode);
+    }
+
+    private static string SummarizeProviderError(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            var provider = ReadJsonString(root, "provider");
+            var error = ReadJsonString(root, "error") ?? ReadJsonString(root, "detail");
+            if (!string.IsNullOrWhiteSpace(provider) || !string.IsNullOrWhiteSpace(error))
+            {
+                return $"Provider={provider ?? "unknown"}; Error={error ?? "unknown"}";
+            }
+        }
+        catch (JsonException)
+        {
+            // Non-JSON upstream errors are still useful, so fall through to the raw text summary.
+        }
+
+        return body.Length > 1000 ? body[..1000] : body;
+    }
+
+    private static string? ReadJsonString(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
     }
 
     private static JsonSerializerOptions CreateJsonOptions()

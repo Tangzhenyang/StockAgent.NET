@@ -84,11 +84,12 @@ def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnaps
     quote_row = _first_successful_row(
         [
             lambda: _load_a_share_eastmoney_quote_row(normalized),
+            lambda: _load_a_share_tencent_quote_row(normalized),
             lambda: _load_a_share_sina_quote_row(normalized),
         ],
         provider="akshare-a-quote",
     )
-    financial_row = None
+    financial_row = _load_a_share_eastmoney_financial_row(normalized)
     profile_row = None
     last_price = _to_float(_pick(quote_row, "最新价", "last", "最新", "收盘", "close", default=None), required_name="lastPrice")
 
@@ -103,6 +104,8 @@ def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnaps
             financial_row,
             [
                 "TOTALOPERATEREVETZ",
+                "TOTAL_OPERATE_INCOME_YOY",
+                "OPERATE_INCOME_YOY",
                 "DJD_TOI_YOY",
                 "营业总收入同比增长率",
                 "主营业务收入增长率",
@@ -300,8 +303,100 @@ def _load_a_share_sina_quote_row(normalized: NormalizedTicker) -> dict[str, Any]
     }
 
 
+def _load_a_share_tencent_quote_row(normalized: NormalizedTicker) -> dict[str, Any] | None:
+    """Load A-share quote and valuation from Tencent single-stock API. 从腾讯单股接口加载 A 股行情和估值。"""
+
+    symbol = _a_share_prefixed_symbol(normalized.ticker)
+    response = httpx.get(
+        "http://qt.gtimg.cn/q=" + symbol,
+        headers={"User-Agent": "Mozilla/5.0 StockAgent.NET datasource"},
+        timeout=5,
+    )
+    response.raise_for_status()
+    payload = _decode_quoted_payload(response)
+    if not payload:
+        return None
+
+    parts = payload.split("~")
+    if len(parts) <= 45:
+        return None
+
+    latest_price = _to_float(parts[3], required_name="tencentLatestPrice", required=False)
+    if latest_price == 0:
+        return None
+
+    market_cap_yi = _to_float(parts[45], required_name="tencentMarketCap", required=False)
+    pe_ratio = _to_float(parts[39], required_name="tencentPeRatio", required=False)
+
+    return {
+        "代码": parts[2] or normalized.ticker,
+        "名称": parts[1] or "A股公司",
+        "最新价": latest_price,
+        "总市值": market_cap_yi * 100_000_000 if market_cap_yi else 0,
+        "市盈率-动态": pe_ratio,
+        "_quote_source": "tencent-qt-single-stock",
+        "_price_freshness": "intraday-delayed",
+    }
+
+
+def _load_a_share_eastmoney_financial_row(normalized: NormalizedTicker) -> dict[str, Any] | None:
+    """Load compact A-share financial indicators from Eastmoney F10. 从东方财富 F10 加载紧凑 A 股财务指标。"""
+
+    code = ("SH" if normalized.ticker.startswith(("6", "9")) else "SZ") + normalized.ticker
+    for url in [
+        "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew",
+        "http://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew",
+    ]:
+        try:
+            response = httpx.get(
+                url,
+                params={"type": "1", "code": code},
+                headers={
+                    "Referer": f"https://emweb.securities.eastmoney.com/PC_HSF10/FinanceAnalysis/Index?type=web&code={code}",
+                    "User-Agent": "Mozilla/5.0 StockAgent.NET datasource",
+                },
+                timeout=5,
+            )
+            response.raise_for_status()
+            row = _first_financial_record(response.json())
+            if row:
+                return row
+        except Exception:
+            continue
+
+    return None
+
+
+def _first_financial_record(payload: Any) -> dict[str, Any] | None:
+    """Return the first financial record from common Eastmoney response shapes. 从常见东方财富响应结构返回首条财务记录。"""
+
+    if not isinstance(payload, dict):
+        return None
+
+    candidates = [
+        payload.get("data"),
+        payload.get("zyzb"),
+        payload.get("result", {}).get("data") if isinstance(payload.get("result"), dict) else None,
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, list):
+            return next((item for item in candidate if isinstance(item, dict)), None)
+        if isinstance(candidate, dict):
+            nested = candidate.get("data")
+            if isinstance(nested, list):
+                return next((item for item in nested if isinstance(item, dict)), None)
+
+    return None
+
+
 def _decode_sina_quote_payload(response: Any) -> str:
     """Decode Sina quote JavaScript payload and return the comma-separated body. 解码新浪行情脚本并返回逗号分隔正文。"""
+
+    return _decode_quoted_payload(response)
+
+
+def _decode_quoted_payload(response: Any) -> str:
+    """Decode a provider JavaScript payload and return the quoted body. 解码提供器脚本并返回引号内正文。"""
 
     content = getattr(response, "content", b"")
     if isinstance(content, bytes) and content:

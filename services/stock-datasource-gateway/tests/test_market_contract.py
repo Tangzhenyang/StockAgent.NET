@@ -15,7 +15,9 @@ def disable_eastmoney_realtime_quote(monkeypatch):
     """Disable real network quote calls unless a test explicitly overrides them. 默认关闭真实网络行情调用，避免测试打外网。"""
 
     monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_quote_row", lambda _normalized: None)
+    monkeypatch.setattr(akshare_market, "_load_a_share_tencent_quote_row", lambda _normalized: None, raising=False)
     monkeypatch.setattr(akshare_market, "_load_a_share_sina_quote_row", lambda _normalized: None, raising=False)
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_financial_row", lambda _normalized: None, raising=False)
 
 
 def test_market_snapshot_contract(client, auth_headers, monkeypatch):
@@ -192,6 +194,59 @@ def test_a_share_snapshot_uses_sina_single_stock_quote_when_eastmoney_times_out(
     assert snapshot.quote_source == "sina-hq-single-stock"
 
 
+def test_a_share_snapshot_uses_tencent_metrics_when_eastmoney_fails(monkeypatch):
+    def fake_failed_eastmoney(normalized):
+        raise TimeoutError("eastmoney unavailable")
+
+    def fake_tencent_realtime(normalized):
+        return {
+            "代码": normalized.ticker,
+            "名称": "江波龙",
+            "最新价": 658.18,
+            "总市值": 278_800_000_000,
+            "市盈率-动态": 18.05,
+            "_quote_source": "tencent-qt-single-stock",
+            "_price_freshness": "intraday-delayed",
+        }
+
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_quote_row", fake_failed_eastmoney, raising=False)
+    monkeypatch.setattr(akshare_market, "_load_a_share_tencent_quote_row", fake_tencent_realtime, raising=False)
+
+    snapshot = akshare_market._load_a_share_snapshot(None, normalize_ticker("301308"))
+
+    assert snapshot.last_price == 658.18
+    assert snapshot.market_cap == 278_800_000_000
+    assert snapshot.pe_ratio == 18.05
+    assert snapshot.quote_source == "tencent-qt-single-stock"
+
+
+def test_a_share_snapshot_merges_fast_financial_indicators(monkeypatch):
+    def fake_eastmoney_quote(normalized):
+        return {
+            "代码": normalized.ticker,
+            "名称": "江波龙",
+            "最新价": 658.18,
+            "总市值": 278_800_000_000,
+            "市盈率-动态": 18.05,
+            "_quote_source": "eastmoney-push2-stock-get",
+            "_price_freshness": "intraday-delayed",
+        }
+
+    def fake_financial_row(normalized):
+        return {
+            "TOTAL_OPERATE_INCOME_YOY": 132.79,
+            "XSJLL": 40.16,
+        }
+
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_quote_row", fake_eastmoney_quote, raising=False)
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_financial_row", fake_financial_row, raising=False)
+
+    snapshot = akshare_market._load_a_share_snapshot(None, normalize_ticker("301308"))
+
+    assert snapshot.revenue_growth_percent == 132.79
+    assert snapshot.net_margin_percent == 40.16
+
+
 def test_eastmoney_single_stock_quote_retries_http_when_https_times_out(monkeypatch):
     class FakeResponse:
         @staticmethod
@@ -230,6 +285,59 @@ def test_eastmoney_single_stock_quote_retries_http_when_https_times_out(monkeypa
     assert row["总市值"] == 278_800_000_000
     assert row["市盈率-动态"] == 67.3
     assert row["_quote_source"] == "eastmoney-push2-stock-get-http"
+
+
+def test_tencent_single_stock_quote_parses_market_cap_and_pe(monkeypatch):
+    parts = [""] * 50
+    parts[1] = "江波龙"
+    parts[2] = "301308"
+    parts[3] = "658.18"
+    parts[39] = "18.05"
+    parts[45] = "2788.00"
+    payload = "v_sz301308=\"" + "~".join(parts) + "\";"
+
+    class FakeResponse:
+        content = payload.encode("gb18030")
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+    monkeypatch.setattr(akshare_market.httpx, "get", lambda *args, **kwargs: FakeResponse())
+
+    row = akshare_market._load_a_share_tencent_quote_row(normalize_ticker("301308"))
+
+    assert row["名称"] == "江波龙"
+    assert row["最新价"] == 658.18
+    assert row["总市值"] == 278_800_000_000
+    assert row["市盈率-动态"] == 18.05
+    assert row["_quote_source"] == "tencent-qt-single-stock"
+
+
+def test_eastmoney_fast_financial_row_parses_growth_and_margin(monkeypatch):
+    class FakeResponse:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "data": [
+                    {
+                        "REPORT_DATE": "2026-03-31",
+                        "TOTAL_OPERATE_INCOME_YOY": 132.79,
+                        "XSJLL": 40.16,
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(akshare_market.httpx, "get", lambda *args, **kwargs: FakeResponse())
+
+    row = akshare_market._load_a_share_eastmoney_financial_row(normalize_ticker("301308"))
+
+    assert row["TOTAL_OPERATE_INCOME_YOY"] == 132.79
+    assert row["XSJLL"] == 40.16
 
 
 def test_a_share_snapshot_skips_all_slow_fallbacks_after_failed_single_stock_quote(monkeypatch):

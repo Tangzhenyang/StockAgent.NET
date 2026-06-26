@@ -154,9 +154,9 @@ export async function downloadResearchReportPdf(downloadUrl: string, fileName: s
 /**
  * Reads a useful error message from ASP.NET Core ProblemDetails responses.
  */
-async function readApiError(response: Response, fallback: string): Promise<string> {
+export async function readApiError(response: Response, fallback: string): Promise<string> {
   const contentType = response.headers.get('content-type') ?? '';
-  if (!contentType.includes('application/json')) {
+  if (!contentType.includes('json')) {
     return fallback;
   }
 

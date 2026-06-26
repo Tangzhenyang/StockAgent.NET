@@ -139,6 +139,34 @@ public sealed class MultiAgentAnalysisServiceTests
     }
 
     /// <summary>
+    /// MarketFinancialAgent tolerates list fields returned as a single string.
+    /// MarketFinancialAgent 可以容忍模型把列表字段返回为单个字符串。
+    /// </summary>
+    [Fact]
+    public async Task MarketFinancialAgent_ParsesStringListModelOutput()
+    {
+        var client = new FakeModelChatClient("""
+        {
+          "score": 70,
+          "valuationView": "估值偏高",
+          "strengths": "净利率稳定；价格创出阶段新高",
+          "risks": "PE 偏高",
+          "followUpQuestions": "增长能否延续"
+        }
+        """);
+        var agent = new MarketFinancialAgent(client);
+
+        var output = await agent.RunAsync(
+            new MarketFinancialAgentInput(CreateSnapshot(), null, "zh-CN"),
+            CancellationToken.None);
+
+        output.Strengths.Should().Contain("净利率稳定");
+        output.Strengths.Should().Contain("价格创出阶段新高");
+        output.Risks.Should().ContainSingle("PE 偏高");
+        output.FollowUpQuestions.Should().ContainSingle("增长能否延续");
+    }
+
+    /// <summary>
     /// Fixed-flow analysis returns the synthesis result when review approves.
     /// 审核通过时固定流程分析会返回综合结果。
     /// </summary>

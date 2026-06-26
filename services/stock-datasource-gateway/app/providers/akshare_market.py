@@ -207,9 +207,34 @@ def _a_share_prefixed_symbol(ticker: str) -> str:
 def _load_a_share_eastmoney_quote_row(normalized: NormalizedTicker) -> dict[str, Any] | None:
     """Load A-share intraday delayed quote from Eastmoney single-stock API. 从东方财富单股接口加载 A 股盘中延迟行情。"""
 
+    errors: list[str] = []
+    for url in [
+        "https://push2.eastmoney.com/api/qt/stock/get",
+        "http://push2.eastmoney.com/api/qt/stock/get",
+    ]:
+        try:
+            row = _load_a_share_eastmoney_quote_row_from_url(normalized, url)
+            if row:
+                return row
+        except Exception as exc:
+            errors.append(str(exc))
+
+    if errors:
+        raise DataSourceProviderError(
+            "Eastmoney single-stock quote failed. " + "; ".join(errors),
+            provider="eastmoney-push2-stock-get",
+            retryable=True,
+        )
+
+    return None
+
+
+def _load_a_share_eastmoney_quote_row_from_url(normalized: NormalizedTicker, url: str) -> dict[str, Any] | None:
+    """Load A-share quote from one Eastmoney endpoint URL. 从单个东方财富端点 URL 加载 A 股行情。"""
+
     secid = _eastmoney_secid(normalized.ticker)
     response = httpx.get(
-        "https://push2.eastmoney.com/api/qt/stock/get",
+        url,
         params={
             "secid": secid,
             "fields": "f43,f57,f58,f116,f162",
@@ -234,7 +259,7 @@ def _load_a_share_eastmoney_quote_row(normalized: NormalizedTicker) -> dict[str,
         "最新价": latest_price,
         "总市值": market_cap,
         "市盈率-动态": pe_ratio,
-        "_quote_source": "eastmoney-push2-stock-get",
+        "_quote_source": "eastmoney-push2-stock-get-http" if url.startswith("http://") else "eastmoney-push2-stock-get",
         "_price_freshness": "intraday-delayed",
     }
 

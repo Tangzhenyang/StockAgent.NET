@@ -192,6 +192,46 @@ def test_a_share_snapshot_uses_sina_single_stock_quote_when_eastmoney_times_out(
     assert snapshot.quote_source == "sina-hq-single-stock"
 
 
+def test_eastmoney_single_stock_quote_retries_http_when_https_times_out(monkeypatch):
+    class FakeResponse:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "data": {
+                    "f43": 67730,
+                    "f57": "301308",
+                    "f58": "江波龙",
+                    "f116": 278_800_000_000,
+                    "f162": 67.3,
+                }
+            }
+
+    requested_urls = []
+
+    def fake_get(url, *args, **kwargs):
+        requested_urls.append(url)
+        if str(url).startswith("https://"):
+            raise TimeoutError("_ssl.c:993: The handshake operation timed out")
+        return FakeResponse()
+
+    monkeypatch.setattr(akshare_market.httpx, "get", fake_get)
+
+    row = akshare_market._load_a_share_eastmoney_quote_row(normalize_ticker("301308"))
+
+    assert requested_urls == [
+        "https://push2.eastmoney.com/api/qt/stock/get",
+        "http://push2.eastmoney.com/api/qt/stock/get",
+    ]
+    assert row["最新价"] == 677.3
+    assert row["总市值"] == 278_800_000_000
+    assert row["市盈率-动态"] == 67.3
+    assert row["_quote_source"] == "eastmoney-push2-stock-get-http"
+
+
 def test_a_share_snapshot_skips_all_slow_fallbacks_after_failed_single_stock_quote(monkeypatch):
     def fake_failed_eastmoney_realtime(normalized):
         return None

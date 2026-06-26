@@ -194,6 +194,73 @@ def test_a_share_snapshot_uses_sina_single_stock_quote_when_eastmoney_times_out(
     assert snapshot.quote_source == "sina-hq-single-stock"
 
 
+def test_a_share_snapshot_keeps_sina_price_and_merges_metrics(monkeypatch):
+    def fake_sina_realtime(normalized):
+        return {
+            "代码": normalized.ticker,
+            "名称": "江波龙",
+            "最新价": 658.18,
+            "总市值": 0,
+            "市盈率-动态": 0,
+            "_quote_source": "sina-hq-single-stock",
+            "_price_freshness": "intraday-delayed",
+        }
+
+    def fake_tencent_metrics(normalized):
+        return {
+            "代码": normalized.ticker,
+            "名称": "江波龙",
+            "最新价": 650.00,
+            "总市值": 278_800_000_000,
+            "市盈率-动态": 18.05,
+            "_quote_source": "tencent-qt-single-stock",
+            "_price_freshness": "intraday-delayed",
+        }
+
+    monkeypatch.setattr(akshare_market, "_load_a_share_sina_quote_row", fake_sina_realtime, raising=False)
+    monkeypatch.setattr(akshare_market, "_load_a_share_tencent_quote_row", fake_tencent_metrics, raising=False)
+
+    snapshot = akshare_market._load_a_share_snapshot(None, normalize_ticker("301308"))
+
+    assert snapshot.last_price == 658.18
+    assert snapshot.market_cap == 278_800_000_000
+    assert snapshot.pe_ratio == 18.05
+    assert snapshot.quote_source == "sina-hq-single-stock+tencent-qt-single-stock"
+
+
+def test_a_share_snapshot_uses_akshare_financial_metrics_when_fast_financial_fails(monkeypatch):
+    pd = __import__("pandas")
+
+    def fake_sina_realtime(normalized):
+        return {
+            "代码": normalized.ticker,
+            "名称": "江波龙",
+            "最新价": 658.18,
+            "总市值": 0,
+            "市盈率-动态": 0,
+            "_quote_source": "sina-hq-single-stock",
+            "_price_freshness": "intraday-delayed",
+        }
+
+    class FakeAk:
+        @staticmethod
+        def stock_financial_analysis_indicator_em(symbol, indicator):
+            return pd.DataFrame([{"EPSJB": 10.0, "TOTALOPERATEREVETZ": 132.7, "XSJLL": 40.1}])
+
+        @staticmethod
+        def stock_financial_analysis_indicator(symbol, start_year):
+            raise AssertionError("secondary financial endpoint should not be reached")
+
+    monkeypatch.setattr(akshare_market, "_load_a_share_sina_quote_row", fake_sina_realtime, raising=False)
+    monkeypatch.setattr(akshare_market, "_load_a_share_eastmoney_financial_row", lambda _normalized: None, raising=False)
+
+    snapshot = akshare_market._load_a_share_snapshot(FakeAk, normalize_ticker("301308"))
+
+    assert snapshot.pe_ratio == 65.818
+    assert snapshot.revenue_growth_percent == 132.7
+    assert snapshot.net_margin_percent == 40.1
+
+
 def test_a_share_snapshot_uses_tencent_metrics_when_eastmoney_fails(monkeypatch):
     def fake_failed_eastmoney(normalized):
         raise TimeoutError("eastmoney unavailable")

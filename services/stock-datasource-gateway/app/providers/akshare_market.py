@@ -13,7 +13,7 @@ def load_market_snapshot(normalized: NormalizedTicker) -> MarketSnapshotResponse
     """Load a real market and financial snapshot from the configured real providers. 从真实数据提供器加载行情和财务快照。"""
 
     if normalized.market == "AShare":
-        return _load_a_share_snapshot(None, normalized)
+        return _load_a_share_snapshot(_try_import_akshare(), normalized)
 
     try:
         import akshare as ak  # type: ignore[import-not-found]
@@ -28,6 +28,17 @@ def load_market_snapshot(normalized: NormalizedTicker) -> MarketSnapshotResponse
         return _load_hong_kong_snapshot(ak, normalized)
 
     return _load_a_share_snapshot(ak, normalized)
+
+
+def _try_import_akshare() -> Any | None:
+    """Try to import AKShare for optional enrichment without blocking quote retrieval. 尝试导入 AKShare 作为可选补全，不阻断行情获取。"""
+
+    try:
+        import akshare as ak  # type: ignore[import-not-found]
+    except Exception:
+        return None
+
+    return ak
 
 
 def _load_hong_kong_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnapshotResponse:
@@ -81,17 +92,29 @@ def _load_hong_kong_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSna
 def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnapshotResponse:
     """Load an A-share snapshot from a fast single-stock quote endpoint. 从快速单股接口加载 A 股快照。"""
 
-    quote_row = _first_successful_row(
+    price_row = _first_successful_row(
         [
+            lambda: _load_a_share_sina_quote_row(normalized),
             lambda: _load_a_share_eastmoney_quote_row(normalized),
             lambda: _load_a_share_tencent_quote_row(normalized),
-            lambda: _load_a_share_sina_quote_row(normalized),
         ],
         provider="akshare-a-quote",
     )
-    financial_row = _load_a_share_eastmoney_financial_row(normalized)
+    metric_row = _first_optional_successful_row(
+        [
+            lambda: _load_a_share_eastmoney_quote_row(normalized),
+            lambda: _load_a_share_tencent_quote_row(normalized),
+        ]
+    )
+    financial_row = _first_optional_successful_row(
+        [
+            lambda: _load_a_share_eastmoney_financial_row(normalized),
+            lambda: _load_a_share_financial_row(ak, normalized) if ak is not None else None,
+        ]
+    )
     profile_row = None
-    last_price = _to_float(_pick(quote_row, "最新价", "last", "最新", "收盘", "close", default=None), required_name="lastPrice")
+    quote_row = _merge_quote_rows(price_row, metric_row)
+    last_price = _to_float(_pick(price_row, "最新价", "last", "最新", "收盘", "close", default=None), required_name="lastPrice")
 
     return MarketSnapshotResponse(
         ticker=normalized.ticker,
@@ -117,7 +140,7 @@ def _load_a_share_snapshot(ak: Any, normalized: NormalizedTicker) -> MarketSnaps
         netMarginPercent=_first_optional_number(financial_row, ["XSJLL", "销售净利率", "净利率", "销售净利率(%)"]),
         quoteSource=str(quote_row.get("_quote_source", "akshare-a-quote")),
         retrievedAt=datetime.now(UTC),
-        priceFreshness=str(quote_row.get("_price_freshness", "intraday-delayed")),
+        priceFreshness=str(price_row.get("_price_freshness", "intraday-delayed")),
     )
 
 
@@ -519,6 +542,41 @@ def _first_successful_row(loaders: list[Any], provider: str) -> dict[str, Any]:
         provider=provider,
         retryable=True,
     )
+
+
+def _first_optional_successful_row(loaders: list[Any]) -> dict[str, Any] | None:
+    """Return the first optional non-empty row without failing the snapshot. 返回首个可选非空行，不影响快照主流程。"""
+
+    for loader in loaders:
+        try:
+            row = loader()
+            if row:
+                return row
+        except Exception:
+            continue
+
+    return None
+
+
+def _merge_quote_rows(price_row: dict[str, Any], metric_row: dict[str, Any] | None) -> dict[str, Any]:
+    """Keep the primary price row while filling missing valuation fields from a metric row. 保留主价格行，并从指标行补齐估值字段。"""
+
+    if not metric_row:
+        return price_row
+
+    merged = dict(price_row)
+    for key in ["总市值", "市盈率-动态", "市盈率", "pe", "market_cap"]:
+        if _to_float(merged.get(key), required_name=key, required=False) == 0:
+            value = metric_row.get(key)
+            if value not in (None, "", "-"):
+                merged[key] = value
+
+    price_source = str(price_row.get("_quote_source", "price"))
+    metric_source = str(metric_row.get("_quote_source", "metrics"))
+    if metric_source != price_source:
+        merged["_quote_source"] = f"{price_source}+{metric_source}"
+
+    return merged
 
 
 def _optional_row(loader: Any) -> dict[str, Any] | None:

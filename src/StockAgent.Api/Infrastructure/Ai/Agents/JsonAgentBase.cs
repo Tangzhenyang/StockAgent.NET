@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using StockAgent.Api.Features.UserSettings;
 using StockAgent.Api.Infrastructure.Ai.Chat;
@@ -63,7 +64,62 @@ public abstract class JsonAgentBase<TInput, TOutput>(
             cleaned = cleaned[..^3].Trim();
         }
 
-        return JsonSerializer.Deserialize<TOutput>(cleaned, JsonOptions)
-               ?? throw new InvalidOperationException($"Model returned empty JSON for {typeof(TOutput).Name}.");
+        try
+        {
+            return JsonSerializer.Deserialize<TOutput>(cleaned, JsonOptions)
+                   ?? throw new InvalidOperationException($"Model returned empty JSON for {typeof(TOutput).Name}.");
+        }
+        catch (JsonException) when (cleaned.Contains('\n') || cleaned.Contains('\r'))
+        {
+            var repaired = EscapeRawLineBreaksInsideJsonStrings(cleaned);
+            return JsonSerializer.Deserialize<TOutput>(repaired, JsonOptions)
+                   ?? throw new InvalidOperationException($"Model returned empty JSON for {typeof(TOutput).Name}.");
+        }
+    }
+
+    private static string EscapeRawLineBreaksInsideJsonStrings(string json)
+    {
+        var builder = new StringBuilder(json.Length);
+        var inString = false;
+        var escaping = false;
+        foreach (var character in json)
+        {
+            if (escaping)
+            {
+                builder.Append(character);
+                escaping = false;
+                continue;
+            }
+
+            if (character == '\\' && inString)
+            {
+                builder.Append(character);
+                escaping = true;
+                continue;
+            }
+
+            if (character == '"')
+            {
+                builder.Append(character);
+                inString = !inString;
+                continue;
+            }
+
+            if (inString && character == '\n')
+            {
+                builder.Append("\\n");
+                continue;
+            }
+
+            if (inString && character == '\r')
+            {
+                builder.Append("\\r");
+                continue;
+            }
+
+            builder.Append(character);
+        }
+
+        return builder.ToString();
     }
 }

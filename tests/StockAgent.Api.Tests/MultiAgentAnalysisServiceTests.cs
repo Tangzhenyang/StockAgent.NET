@@ -479,6 +479,41 @@ public sealed class MultiAgentAnalysisServiceTests
         output.Opportunities.Should().Contain("AI 服务器需求拉动");
     }
 
+    /// <summary>
+    /// SynthesisReportAgent tolerates raw Markdown line breaks inside a JSON string.
+    /// SynthesisReportAgent 可以容忍 JSON 字符串里的原始 Markdown 换行。
+    /// </summary>
+    [Fact]
+    public async Task SynthesisReportAgent_RepairsUnescapedMarkdownLineBreaks()
+    {
+        var client = new FakeModelChatClient("""
+        {
+          "overallScore": 68,
+          "riskLevel": "中等",
+          "valuationView": "估值偏高",
+          "summary": "摘要",
+          "keyAssumptions": [],
+          "keyClaims": [],
+          "markdown": "# 江波龙 深度研究报告
+
+        ## 核心结论
+        当前报告基于已取得证据生成。"
+        }
+        """);
+        var agent = new SynthesisReportAgent(client);
+
+        var output = await agent.RunAsync(
+            new SynthesisReportAgentInput(
+                CreateSnapshot(),
+                new MarketFinancialAgentOutput(70, "估值偏高", [], [], []),
+                new EvidenceFilingAgentOutput([], [], [], []),
+                null,
+                "zh-CN"),
+            CancellationToken.None);
+
+        output.Markdown.Should().Contain("## 核心结论");
+    }
+
     internal sealed class FakeModelChatClient(string json) : IModelChatClient
     {
         public Task<string> CompleteJsonAsync(

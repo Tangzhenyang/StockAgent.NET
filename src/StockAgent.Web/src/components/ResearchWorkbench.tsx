@@ -157,7 +157,7 @@ export function ResearchWorkbench() {
             isExporting={pdfMutation.isPending}
             exportFeedback={
               pdfMutation.isError
-                ? 'PDF 导出失败，请确认后端已安装 Playwright Chromium。'
+                ? getMutationErrorMessage(pdfMutation.error, 'PDF 导出失败，请确认后端 Chromium 可用。')
                 : pdfMutation.isSuccess
                   ? 'PDF 已开始下载。'
                   : undefined
@@ -192,4 +192,8 @@ function getTaskStatusClassName(status: ResearchTask['status']) {
   }
 
   return 'taskStatus taskStatusActive';
+}
+
+function getMutationErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message.length > 0 ? error.message : fallback;
 }

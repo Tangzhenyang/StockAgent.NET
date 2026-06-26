@@ -62,6 +62,38 @@ public sealed class PdfExportApiTests
         bytes.Should().StartWith("%PDF"u8.ToArray());
     }
 
+    /// <summary>
+    /// PDF renderer failures return a readable problem payload for the Web UI.
+    /// PDF 渲染器失败时会返回可供 Web UI 展示的问题详情。
+    /// </summary>
+    [Fact]
+    public async Task ExportPdf_ReturnsProblemDetailsWhenRendererFails()
+    {
+        await using var factory = TestApplicationFactory.Create().WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IPdfExportService>();
+                services.AddSingleton<IPdfExportService, FailingPdfExportService>();
+            });
+        });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true
+        });
+        await TestApplicationFactory.RegisterAndLoginAsync(client, "pdf-failure-user");
+        var task = await CreateTaskAsync(client);
+        await SeedReportAsync(factory.Services, task.Id);
+
+        var response = await client.PostAsync($"/api/research-tasks/{task.Id}/pdf", null);
+        var json = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, json);
+        json.Should().Contain("PDF export failed");
+        json.Should().Contain("Chromium missing");
+    }
+
     private static async Task<ResearchTaskResponse> CreateTaskAsync(HttpClient client)
     {
         var response = await client.PostAsJsonAsync(
@@ -105,6 +137,14 @@ public sealed class PdfExportApiTests
             var path = Path.Combine(directory, $"{researchTaskId}.pdf");
             await File.WriteAllBytesAsync(path, "%PDF-1.4 fake pdf"u8.ToArray(), cancellationToken);
             return path;
+        }
+    }
+
+    private sealed class FailingPdfExportService : IPdfExportService
+    {
+        public Task<string> ExportAsync(Guid researchTaskId, string html, CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("Chromium missing");
         }
     }
 }

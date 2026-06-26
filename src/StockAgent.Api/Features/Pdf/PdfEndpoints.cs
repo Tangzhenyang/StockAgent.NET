@@ -38,7 +38,19 @@ public static class PdfEndpoints
             }
 
             var requestedAt = DateTimeOffset.UtcNow;
-            var path = await pdfExportService.ExportAsync(id, report.Html, cancellationToken);
+            string path;
+            try
+            {
+                path = await pdfExportService.ExportAsync(id, report.Html, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return Results.Problem(
+                    title: "PDF export failed",
+                    detail: $"PDF export failed. Please verify Chromium is available in the API container. {exception.Message}",
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
             db.PdfExports.Add(new PdfExport
             {
                 ResearchTaskId = id,

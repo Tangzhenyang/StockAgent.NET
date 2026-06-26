@@ -122,7 +122,7 @@ export async function exportResearchReportPdf(taskId: string): Promise<PdfExport
   });
 
   if (!response.ok) {
-    throw new Error(`Export PDF failed with ${response.status}`);
+    throw new Error(await readApiError(response, `Export PDF failed with ${response.status}`));
   }
 
   return response.json();
@@ -149,4 +149,21 @@ export async function downloadResearchReportPdf(downloadUrl: string, fileName: s
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(objectUrl);
+}
+
+/**
+ * Reads a useful error message from ASP.NET Core ProblemDetails responses.
+ */
+async function readApiError(response: Response, fallback: string): Promise<string> {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    return fallback;
+  }
+
+  try {
+    const body = (await response.json()) as { detail?: string; title?: string };
+    return body.detail ?? body.title ?? fallback;
+  } catch {
+    return fallback;
+  }
 }

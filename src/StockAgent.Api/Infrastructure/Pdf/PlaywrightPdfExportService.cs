@@ -8,6 +8,13 @@ namespace StockAgent.Api.Infrastructure.Pdf;
 /// </summary>
 public sealed class PlaywrightPdfExportService(IWebHostEnvironment environment) : IPdfExportService
 {
+    private static readonly string[] ContainerChromiumArgs =
+    [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage"
+    ];
+
     /// <inheritdoc />
     public async Task<string> ExportAsync(Guid researchTaskId, string html, CancellationToken cancellationToken)
     {
@@ -60,13 +67,18 @@ public sealed class PlaywrightPdfExportService(IWebHostEnvironment environment) 
             return await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Headless = true,
-                ExecutablePath = executablePath
+                ExecutablePath = executablePath,
+                Args = ContainerChromiumArgs
             });
         }
 
         try
         {
-            return await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+            return await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true,
+                Args = ContainerChromiumArgs
+            });
         }
         catch (PlaywrightException exception) when (
             exception.Message.Contains("Executable doesn't exist", StringComparison.OrdinalIgnoreCase))
